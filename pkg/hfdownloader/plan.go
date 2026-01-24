@@ -25,7 +25,8 @@ type PlanItem struct {
 
 // Plan contains the list of files to download.
 type Plan struct {
-	Items []PlanItem `json:"items"`
+	Items  []PlanItem `json:"items"`
+	Commit string     `json:"commit,omitempty"` // Commit hash for this plan (for HF cache snapshots)
 }
 
 // PlanRepo builds the file list without downloading.
@@ -48,7 +49,18 @@ func scanRepo(ctx context.Context, httpc *http.Client, token string, job Job, cf
 	var items []PlanItem
 	seen := make(map[string]struct{}) // ensure each relative path appears once in the plan
 
-	err := walkTree(ctx, httpc, token, cfg.Endpoint, job, "", func(n hfNode) error {
+	// Fetch actual commit SHA for the revision
+	repoInfo, err := fetchRepoInfo(ctx, httpc, token, cfg.Endpoint, job)
+	if err != nil {
+		// Fall back to revision name if API call fails (e.g., some mirrors)
+		repoInfo = &RepoInfo{SHA: job.Revision}
+	}
+	commitSHA := repoInfo.SHA
+	if commitSHA == "" {
+		commitSHA = job.Revision // fallback
+	}
+
+	err = walkTree(ctx, httpc, token, cfg.Endpoint, job, "", func(n hfNode) error {
 		if n.Type != "file" && n.Type != "blob" {
 			return nil
 		}
@@ -134,7 +146,7 @@ func scanRepo(ctx context.Context, httpc *http.Client, token string, job Job, cf
 	if err != nil {
 		return nil, err
 	}
-	return &Plan{Items: items}, nil
+	return &Plan{Items: items, Commit: commitSHA}, nil
 }
 
 // destinationBase returns the base output directory for a job.

@@ -57,9 +57,13 @@ func (pr *progressReader) Read(p []byte) (n int, err error) {
 }
 
 // Download scans and downloads files from a HuggingFace repo.
-// Resume is always ON—skip decisions rely ONLY on the filesystem:
-//   - LFS files: sha256 comparison when SHA is available.
-//   - non-LFS files: size comparison.
+//
+// v3.0+: Files are stored in HuggingFace Hub cache structure by default:
+//   - Blobs: hub/models--{owner}--{repo}/blobs/{sha256}
+//   - Snapshots: hub/models--{owner}--{repo}/snapshots/{commit}/{path} (symlinks)
+//   - Friendly: models/{owner}/{repo}/{path} (symlinks)
+//
+// Legacy mode (OutputDir set): Falls back to flat directory structure.
 //
 // Cancellation: all loops/sleeps/requests are tied to ctx for fast abort.
 func Download(ctx context.Context, job Job, cfg Settings, progress ProgressFunc) error {
@@ -74,14 +78,43 @@ func Download(ctx context.Context, job Job, cfg Settings, progress ProgressFunc)
 	if job.Revision == "" {
 		job.Revision = "main"
 	}
-	if cfg.OutputDir == "" {
-		cfg.OutputDir = "Storage"
-	}
 	if cfg.Concurrency <= 0 {
 		cfg.Concurrency = 8
 	}
 	if cfg.MaxActiveDownloads <= 0 {
 		cfg.MaxActiveDownloads = runtime.GOMAXPROCS(0)
+	}
+
+	// Determine storage mode: HF cache (new) vs flat directory (legacy)
+	// Use HF cache mode when:
+	// 1. --cache-dir is explicitly set, OR
+	// 2. --output is NOT set (default to HF cache)
+	useHFCache := cfg.CacheDir != "" || cfg.OutputDir == ""
+	var hfCache *HFCache
+	var repoDir *RepoDir
+
+	if useHFCache {
+		var err error
+		hfCache, err = cfg.BuildHFCache()
+		if err != nil {
+			return fmt.Errorf("build hf cache: %w", err)
+		}
+		repoType := RepoTypeModel
+		if job.IsDataset {
+			repoType = RepoTypeDataset
+		}
+		repoDir, err = hfCache.Repo(job.Repo, repoType)
+		if err != nil {
+			return fmt.Errorf("create repo dir: %w", err)
+		}
+		if err := repoDir.EnsureDirs(); err != nil {
+			return fmt.Errorf("ensure repo dirs: %w", err)
+		}
+	} else {
+		// Legacy mode: use OutputDir
+		if cfg.OutputDir == "" {
+			cfg.OutputDir = "Storage"
+		}
 	}
 
 	thresholdBytes, err := parseSizeString(cfg.MultipartThreshold, 256<<20)
@@ -122,9 +155,12 @@ func Download(ctx context.Context, job Job, cfg Settings, progress ProgressFunc)
 		emit(ProgressEvent{Event: "plan_item", Path: displayRel, Total: item.Size})
 	}
 
-	// Ensure destination root exists
-	if err := os.MkdirAll(destinationBase(job, cfg), 0o755); err != nil {
-		return err
+	// Ensure destination root exists (only for legacy mode)
+	// HF cache mode already created directories via repoDir.EnsureDirs()
+	if !useHFCache {
+		if err := os.MkdirAll(destinationBase(job, cfg), 0o755); err != nil {
+			return err
+		}
 	}
 
 	// Overall concurrency limiter (ctx-aware acquisition)
@@ -167,13 +203,47 @@ LOOP:
 			fileCtx, fileCancel := context.WithCancel(ctx)
 			defer fileCancel()
 
-			// Final destination path
-			base := destinationBase(job, cfg)
 			finalRel := it.RelativePath
+			filterSubdir := ""
 			if job.AppendFilterSubdir && it.Subdir != "" {
+				filterSubdir = it.Subdir
 				finalRel = filepath.ToSlash(filepath.Join(it.Subdir, it.RelativePath))
 			}
-			dst := filepath.Join(base, finalRel)
+
+			var dst string
+			var skipCheck func() (bool, string, error)
+
+			if useHFCache {
+				// HF Cache mode: check blob existence
+				skipCheck = func() (bool, string, error) {
+					if it.SHA256 != "" {
+						status, _, err := repoDir.CheckBlob(it.SHA256)
+						if err != nil {
+							return false, "", err
+						}
+						if status == BlobComplete {
+							// Blob exists, but ensure symlinks are in place
+							if err := repoDir.createSnapshotSymlink(plan.Commit, it.RelativePath, it.SHA256); err == nil {
+								repoDir.CreateFriendlySymlink(plan.Commit, it.RelativePath, filterSubdir)
+							}
+							return true, "blob exists", nil
+						}
+						if status == BlobDownloading {
+							return true, "downloading by another process", nil
+						}
+					}
+					return false, "", nil
+				}
+				// Download to temp location, will be moved to blob later
+				dst = filepath.Join(repoDir.BlobsDir(), "tmp-"+filepath.Base(it.RelativePath))
+			} else {
+				// Legacy mode: flat directory structure
+				base := destinationBase(job, cfg)
+				dst = filepath.Join(base, finalRel)
+				skipCheck = func() (bool, string, error) {
+					return shouldSkipLocal(it, dst)
+				}
+			}
 
 			if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
 				select {
@@ -183,8 +253,8 @@ LOOP:
 				return
 			}
 
-			// Filesystem-based skip/resume
-			alreadyOK, reason, err := shouldSkipLocal(it, dst)
+			// Check if we can skip
+			alreadyOK, reason, err := skipCheck()
 			if err != nil {
 				select {
 				case errCh <- err:
@@ -252,6 +322,19 @@ LOOP:
 				}
 			}
 
+			// For HF Cache mode: move to blob and create symlinks
+			if useHFCache {
+				sha := it.SHA256
+				_, err := repoDir.StoreDownloadedFile(dst, it.RelativePath, plan.Commit, sha, filterSubdir)
+				if err != nil {
+					select {
+					case errCh <- fmt.Errorf("store file %s: %w", finalRel, err):
+					default:
+					}
+					return
+				}
+			}
+
 			emit(ProgressEvent{Event: "file_done", Path: finalRel})
 			atomic.AddInt64(&downloadedCount, 1)
 		}()
@@ -275,6 +358,45 @@ LOOP:
 
 	if ctx.Err() != nil {
 		return ctx.Err()
+	}
+
+	// For HF Cache mode: write ref file and ensure friendly directory exists
+	if useHFCache && repoDir != nil {
+		// Write refs/main (or the revision used)
+		ref := job.Revision
+		if ref == "" {
+			ref = "main"
+		}
+		if err := repoDir.WriteRef(ref, plan.Commit); err != nil {
+			emit(ProgressEvent{Level: "warn", Event: "warning", Message: fmt.Sprintf("failed to write ref: %v", err)})
+		}
+		// Ensure friendly directory structure exists
+		if err := repoDir.EnsureFriendlyDir(); err != nil {
+			emit(ProgressEvent{Level: "warn", Event: "warning", Message: fmt.Sprintf("failed to create friendly dir: %v", err)})
+		}
+	}
+
+	// Write/update the rebuild shell script if using HF cache
+	if hfCache != nil {
+		if _, err := hfCache.WriteRebuildScript(); err != nil {
+			emit(ProgressEvent{Level: "warn", Event: "warning", Message: fmt.Sprintf("failed to write rebuild script: %v", err)})
+		}
+	}
+
+	// Write manifest file (hfd.yaml) if using HF cache
+	if repoDir != nil && cfg.Command != "" {
+		manifest, err := hfCache.GenerateManifestFromCache(repoDir)
+		if err == nil {
+			// Override command with the actual CLI command used
+			manifest.Command = cfg.Command
+			manifest.StartedAt = time.Now().UTC() // Approximate, but better than nothing
+			manifest.CompletedAt = time.Now().UTC()
+			if _, err := manifest.Write(repoDir.FriendlyPath()); err != nil {
+				emit(ProgressEvent{Level: "warn", Event: "warning", Message: fmt.Sprintf("failed to write manifest: %v", err)})
+			}
+		} else {
+			emit(ProgressEvent{Level: "warn", Event: "warning", Message: fmt.Sprintf("failed to generate manifest: %v", err)})
+		}
 	}
 
 	emit(ProgressEvent{

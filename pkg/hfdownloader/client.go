@@ -182,4 +182,39 @@ func pathEscapeAll(p string) string {
 	return strings.Join(segs, "/")
 }
 
+// RepoInfo contains metadata about a HuggingFace repository.
+type RepoInfo struct {
+	SHA          string `json:"sha"`           // Commit hash
+	LastModified string `json:"lastModified"`  // ISO timestamp
+}
+
+// fetchRepoInfo fetches repository metadata including the commit SHA for a given revision.
+func fetchRepoInfo(ctx context.Context, httpc *http.Client, token, endpoint string, job Job) (*RepoInfo, error) {
+	ep := getEndpoint(endpoint)
+	var reqURL string
+	if job.IsDataset {
+		reqURL = fmt.Sprintf("%s/api/datasets/%s/revision/%s", ep, job.Repo, url.PathEscape(job.Revision))
+	} else {
+		reqURL = fmt.Sprintf("%s/api/models/%s/revision/%s", ep, job.Repo, url.PathEscape(job.Revision))
+	}
+
+	req, _ := http.NewRequestWithContext(ctx, "GET", reqURL, nil)
+	addAuth(req, token)
+	resp, err := httpc.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		return nil, fmt.Errorf("repo info API failed: %s", resp.Status)
+	}
+
+	var info RepoInfo
+	if err := json.NewDecoder(resp.Body).Decode(&info); err != nil {
+		return nil, err
+	}
+	return &info, nil
+}
+
 

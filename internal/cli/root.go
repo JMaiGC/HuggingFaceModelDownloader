@@ -62,6 +62,7 @@ func Execute(version string) error {
 	root.AddCommand(newVersionCmd(version))
 	root.AddCommand(newServeCmd(ro))
 	root.AddCommand(newConfigCmd())
+	root.AddCommand(newRebuildCmd(ro))
 
 	// Make download the default command when no subcommand is given
 	root.RunE = downloadCmd.RunE
@@ -141,7 +142,9 @@ func newDownloadCmd(ctx context.Context, ro *RootOpts) *cobra.Command {
 	cmd.Flags().BoolVar(&job.AppendFilterSubdir, "append-filter-subdir", false, "Append each filter as a subdirectory")
 
 	// Settings flags
-	cmd.Flags().StringVarP(&cfg.OutputDir, "output", "o", "", "Destination base directory (default: Models or Datasets)")
+	cmd.Flags().StringVar(&cfg.CacheDir, "cache-dir", "", "HuggingFace cache directory (default: ~/.cache/huggingface or HF_HOME)")
+	cmd.Flags().StringVar(&cfg.StaleTimeout, "stale-timeout", "5m", "Timeout for stale incomplete downloads")
+	cmd.Flags().StringVarP(&cfg.OutputDir, "output", "o", "", "[DEPRECATED] Use --cache-dir instead")
 	cmd.Flags().IntVarP(&cfg.Concurrency, "connections", "c", 8, "Per-file concurrent connections for LFS range requests")
 	cmd.Flags().IntVar(&cfg.MaxActiveDownloads, "max-active", 3, "Maximum number of files downloading at once")
 	cmd.Flags().StringVar(&cfg.MultipartThreshold, "multipart-threshold", "32MiB", "Use multipart/range downloads only for files >= this size")
@@ -205,8 +208,9 @@ func finalize(cmd *cobra.Command, ro *RootOpts, args []string, job *hfdownloader
 	}
 
 	// Set default output directory based on type (Models or Datasets)
-	// Only if user didn't explicitly set --output
-	if c.OutputDir == "" {
+	// Only if user didn't explicitly set --output AND didn't set --cache-dir
+	// (--cache-dir enables HF cache mode, which doesn't use OutputDir)
+	if c.OutputDir == "" && c.CacheDir == "" {
 		if j.IsDataset {
 			c.OutputDir = "Datasets"
 		} else {
@@ -214,7 +218,47 @@ func finalize(cmd *cobra.Command, ro *RootOpts, args []string, job *hfdownloader
 		}
 	}
 
+	// Build the CLI command string for the manifest (token stripped)
+	c.Command = buildCommandString(cmd, j, c)
+
 	return j, c, nil
+}
+
+// buildCommandString reconstructs the CLI command from flags, excluding sensitive data.
+func buildCommandString(cmd *cobra.Command, job hfdownloader.Job, cfg hfdownloader.Settings) string {
+	var parts []string
+	parts = append(parts, "hfdownloader", "download", job.Repo)
+
+	if job.IsDataset {
+		parts = append(parts, "--dataset")
+	}
+	if job.Revision != "" && job.Revision != "main" {
+		parts = append(parts, "-b", job.Revision)
+	}
+	for _, f := range job.Filters {
+		parts = append(parts, "-F", f)
+	}
+	for _, e := range job.Excludes {
+		parts = append(parts, "-E", e)
+	}
+	if job.AppendFilterSubdir {
+		parts = append(parts, "--append-filter-subdir")
+	}
+	if cfg.CacheDir != "" {
+		parts = append(parts, "--cache-dir", cfg.CacheDir)
+	}
+	if cfg.Concurrency != 8 {
+		parts = append(parts, "-c", fmt.Sprintf("%d", cfg.Concurrency))
+	}
+	if cfg.MaxActiveDownloads != 3 {
+		parts = append(parts, "--max-active", fmt.Sprintf("%d", cfg.MaxActiveDownloads))
+	}
+	if cfg.Verify != "size" && cfg.Verify != "" {
+		parts = append(parts, "--verify", cfg.Verify)
+	}
+	// Note: Token is intentionally omitted for security
+
+	return strings.Join(parts, " ")
 }
 
 func applySettingsDefaults(cmd *cobra.Command, ro *RootOpts, dst *hfdownloader.Settings) error {
