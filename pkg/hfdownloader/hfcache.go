@@ -545,7 +545,8 @@ type StoreFileResult struct {
 //   - commit: the commit hash for the snapshot
 //   - sha256: the known SHA256 (empty string if unknown, will be computed)
 //   - filterSubdir: optional filter subdirectory for friendly view
-func (r *RepoDir) StoreDownloadedFile(tempFile, relativePath, commit, sha256, filterSubdir string) (*StoreFileResult, error) {
+//   - noFriendly: if true, skip creating friendly view symlink
+func (r *RepoDir) StoreDownloadedFile(tempFile, relativePath, commit, sha256, filterSubdir string, noFriendly bool) (*StoreFileResult, error) {
 	// Compute SHA256 if not provided
 	if sha256 == "" {
 		computed, err := computeSHA256(tempFile)
@@ -580,21 +581,24 @@ func (r *RepoDir) StoreDownloadedFile(tempFile, relativePath, commit, sha256, fi
 		return nil, fmt.Errorf("create snapshot symlink: %w", err)
 	}
 
-	// Create friendly view symlink
-	if err := r.CreateFriendlySymlink(commit, relativePath, filterSubdir); err != nil {
-		return nil, fmt.Errorf("create friendly symlink: %w", err)
+	// Create friendly view symlink (unless disabled)
+	if !noFriendly {
+		if err := r.CreateFriendlySymlink(commit, relativePath, filterSubdir); err != nil {
+			return nil, fmt.Errorf("create friendly symlink: %w", err)
+		}
 	}
 
 	result := &StoreFileResult{
 		BlobPath:     blobPath,
 		SnapshotPath: r.SnapshotPath(commit, relativePath),
-		FriendlyPath: r.FriendlyPath(),
 		SHA256:       sha256,
 	}
-	if filterSubdir != "" {
-		result.FriendlyPath = filepath.Join(r.FriendlyPath(), filterSubdir, relativePath)
-	} else {
-		result.FriendlyPath = filepath.Join(r.FriendlyPath(), relativePath)
+	if !noFriendly {
+		if filterSubdir != "" {
+			result.FriendlyPath = filepath.Join(r.FriendlyPath(), filterSubdir, relativePath)
+		} else {
+			result.FriendlyPath = filepath.Join(r.FriendlyPath(), relativePath)
+		}
 	}
 
 	return result, nil

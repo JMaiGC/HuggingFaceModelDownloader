@@ -176,6 +176,15 @@ func Download(ctx context.Context, job Job, cfg Settings, progress ProgressFunc)
 	var skippedCount int64
 	var downloadedCount int64
 
+	// Build manifest during download (thread-safe)
+	// Manifest is always written unless explicitly disabled with NoManifest
+	var manifestBuilder *ManifestBuilder
+	var manifestMu sync.Mutex
+	if useHFCache && !cfg.NoManifest {
+		manifestBuilder = NewManifestBuilder(job, cfg.Command)
+		manifestBuilder.SetCommit(plan.Commit)
+	}
+
 LOOP:
 	for _, item := range plan.Items {
 		// Stop scheduling more work once canceled
@@ -224,7 +233,9 @@ LOOP:
 						if status == BlobComplete {
 							// Blob exists, but ensure symlinks are in place
 							if err := repoDir.createSnapshotSymlink(plan.Commit, it.RelativePath, it.SHA256); err == nil {
-								repoDir.CreateFriendlySymlink(plan.Commit, it.RelativePath, filterSubdir)
+								if !cfg.NoFriendlyView {
+									repoDir.CreateFriendlySymlink(plan.Commit, it.RelativePath, filterSubdir)
+								}
 							}
 							return true, "blob exists", nil
 						}
@@ -266,6 +277,12 @@ LOOP:
 				if _, loaded := skipOnce.LoadOrStore(finalRel, struct{}{}); !loaded {
 					emit(ProgressEvent{Event: "file_done", Path: finalRel, Message: "skip (" + reason + ")"})
 					atomic.AddInt64(&skippedCount, 1)
+					// Add to manifest (skipped files are still part of the download job)
+					if manifestBuilder != nil {
+						manifestMu.Lock()
+						manifestBuilder.AddFile(it.RelativePath, it.SHA256, it.Size, it.LFS)
+						manifestMu.Unlock()
+					}
 				}
 				return
 			}
@@ -323,9 +340,10 @@ LOOP:
 			}
 
 			// For HF Cache mode: move to blob and create symlinks
+			var finalSHA256 string
 			if useHFCache {
 				sha := it.SHA256
-				_, err := repoDir.StoreDownloadedFile(dst, it.RelativePath, plan.Commit, sha, filterSubdir)
+				result, err := repoDir.StoreDownloadedFile(dst, it.RelativePath, plan.Commit, sha, filterSubdir, cfg.NoFriendlyView)
 				if err != nil {
 					select {
 					case errCh <- fmt.Errorf("store file %s: %w", finalRel, err):
@@ -333,6 +351,16 @@ LOOP:
 					}
 					return
 				}
+				finalSHA256 = result.SHA256 // Use computed SHA256 from store result
+			} else {
+				finalSHA256 = it.SHA256
+			}
+
+			// Add to manifest with actual LFS info from API and final SHA256
+			if manifestBuilder != nil {
+				manifestMu.Lock()
+				manifestBuilder.AddFile(it.RelativePath, finalSHA256, it.Size, it.LFS)
+				manifestMu.Unlock()
 			}
 
 			emit(ProgressEvent{Event: "file_done", Path: finalRel})
@@ -370,32 +398,26 @@ LOOP:
 		if err := repoDir.WriteRef(ref, plan.Commit); err != nil {
 			emit(ProgressEvent{Level: "warn", Event: "warning", Message: fmt.Sprintf("failed to write ref: %v", err)})
 		}
-		// Ensure friendly directory structure exists
-		if err := repoDir.EnsureFriendlyDir(); err != nil {
-			emit(ProgressEvent{Level: "warn", Event: "warning", Message: fmt.Sprintf("failed to create friendly dir: %v", err)})
+		// Ensure friendly directory structure exists (unless disabled)
+		if !cfg.NoFriendlyView {
+			if err := repoDir.EnsureFriendlyDir(); err != nil {
+				emit(ProgressEvent{Level: "warn", Event: "warning", Message: fmt.Sprintf("failed to create friendly dir: %v", err)})
+			}
 		}
 	}
 
-	// Write/update the rebuild shell script if using HF cache
-	if hfCache != nil {
+	// Write/update the rebuild shell script if using HF cache (unless friendly view disabled)
+	if hfCache != nil && !cfg.NoFriendlyView {
 		if _, err := hfCache.WriteRebuildScript(); err != nil {
 			emit(ProgressEvent{Level: "warn", Event: "warning", Message: fmt.Sprintf("failed to write rebuild script: %v", err)})
 		}
 	}
 
-	// Write manifest file (hfd.yaml) if using HF cache
-	if repoDir != nil && cfg.Command != "" {
-		manifest, err := hfCache.GenerateManifestFromCache(repoDir)
-		if err == nil {
-			// Override command with the actual CLI command used
-			manifest.Command = cfg.Command
-			manifest.StartedAt = time.Now().UTC() // Approximate, but better than nothing
-			manifest.CompletedAt = time.Now().UTC()
-			if _, err := manifest.Write(repoDir.FriendlyPath()); err != nil {
-				emit(ProgressEvent{Level: "warn", Event: "warning", Message: fmt.Sprintf("failed to write manifest: %v", err)})
-			}
-		} else {
-			emit(ProgressEvent{Level: "warn", Event: "warning", Message: fmt.Sprintf("failed to generate manifest: %v", err)})
+	// Write manifest file (hfd.yaml) if using HF cache (unless friendly view disabled)
+	if manifestBuilder != nil && repoDir != nil && !cfg.NoFriendlyView {
+		manifest := manifestBuilder.Build()
+		if _, err := manifest.Write(repoDir.FriendlyPath()); err != nil {
+			emit(ProgressEvent{Level: "warn", Event: "warning", Message: fmt.Sprintf("failed to write manifest: %v", err)})
 		}
 	}
 

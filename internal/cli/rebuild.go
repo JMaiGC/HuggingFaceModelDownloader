@@ -15,19 +15,17 @@ import (
 
 // SyncOutput is the JSON output format for sync results.
 type SyncOutput struct {
-	ReposScanned     int      `json:"repos_scanned"`
-	SymlinksCreated  int      `json:"symlinks_created"`
-	SymlinksUpdated  int      `json:"symlinks_updated"`
-	OrphansRemoved   int      `json:"orphans_removed,omitempty"`
-	ManifestsWritten int      `json:"manifests_written,omitempty"`
-	Errors           []string `json:"errors,omitempty"`
+	ReposScanned    int      `json:"repos_scanned"`
+	SymlinksCreated int      `json:"symlinks_created"`
+	SymlinksUpdated int      `json:"symlinks_updated"`
+	OrphansRemoved  int      `json:"orphans_removed,omitempty"`
+	Errors          []string `json:"errors,omitempty"`
 }
 
 func newRebuildCmd(ro *RootOpts) *cobra.Command {
 	var cacheDir string
 	var clean bool
 	var writeScript bool
-	var writeManifest bool
 
 	cmd := &cobra.Command{
 		Use:   "rebuild",
@@ -85,25 +83,13 @@ during downloads. Use --write-script to manually update this script.`,
 				return fmt.Errorf("rebuild failed: %w", err)
 			}
 
-			// Write manifests if requested
-			var manifestsWritten int
-			var manifestErrors []error
-			if writeManifest {
-				if !ro.Quiet && !ro.JSONOut {
-					fmt.Println("Writing manifests...")
-				}
-				manifestsWritten, manifestErrors = cache.WriteAllManifests()
-				result.Errors = append(result.Errors, manifestErrors...)
-			}
-
 			// Output results
 			if ro.JSONOut {
 				out := SyncOutput{
-					ReposScanned:     result.ReposScanned,
-					SymlinksCreated:  result.SymlinksCreated,
-					SymlinksUpdated:  result.SymlinksUpdated,
-					OrphansRemoved:   result.OrphansRemoved,
-					ManifestsWritten: manifestsWritten,
+					ReposScanned:    result.ReposScanned,
+					SymlinksCreated: result.SymlinksCreated,
+					SymlinksUpdated: result.SymlinksUpdated,
+					OrphansRemoved:  result.OrphansRemoved,
 				}
 				for _, e := range result.Errors {
 					out.Errors = append(out.Errors, e.Error())
@@ -121,9 +107,6 @@ during downloads. Use --write-script to manually update this script.`,
 				if clean {
 					fmt.Printf("  Orphans removed:   %d\n", result.OrphansRemoved)
 				}
-				if writeManifest {
-					fmt.Printf("  Manifests written: %d\n", manifestsWritten)
-				}
 				if len(result.Errors) > 0 {
 					fmt.Printf("  Errors:            %d\n", len(result.Errors))
 					for _, e := range result.Errors {
@@ -139,7 +122,6 @@ during downloads. Use --write-script to manually update this script.`,
 	cmd.Flags().StringVar(&cacheDir, "cache-dir", "", "HuggingFace cache directory (default: ~/.cache/huggingface or HF_HOME)")
 	cmd.Flags().BoolVar(&clean, "clean", false, "Remove orphaned symlinks (broken symlinks pointing to deleted files)")
 	cmd.Flags().BoolVar(&writeScript, "write-script", false, "Write/update the standalone rebuild.sh script")
-	cmd.Flags().BoolVar(&writeManifest, "write-manifest", false, "Write/update hfd.yaml manifest files for all repos")
 
 	return cmd
 }

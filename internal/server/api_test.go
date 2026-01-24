@@ -41,8 +41,8 @@ func TestAPI_Health(t *testing.T) {
 	if resp["status"] != "ok" {
 		t.Errorf("Expected status ok, got %v", resp["status"])
 	}
-	if resp["version"] != "2.3.0" {
-		t.Errorf("Expected version 2.3.0, got %v", resp["version"])
+	if resp["version"] != "2.3.3" {
+		t.Errorf("Expected version 2.3.3, got %v", resp["version"])
 	}
 }
 

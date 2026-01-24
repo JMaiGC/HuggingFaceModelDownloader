@@ -181,10 +181,18 @@ type Settings struct {
 	// Credits: Feature suggested by windtail (#38)
 	Endpoint string
 
+	// NoManifest disables writing the hfd.yaml manifest file after download.
+	// By default, a manifest is always written to the friendly view directory.
+	NoManifest bool
+
+	// NoFriendlyView disables creating the friendly view symlinks (models/, datasets/).
+	// When set, only the HF cache structure (hub/) is created.
+	// This also skips writing the rebuild.sh script since there's nothing to rebuild.
+	NoFriendlyView bool
+
 	// Command is the CLI command string used to initiate this download.
-	// If set, a manifest file (hfd.yaml) will be written to the friendly
-	// view directory after download completes. The token is automatically
-	// stripped from the command for security.
+	// If set, it will be included in the manifest file (hfd.yaml).
+	// The token is automatically stripped from the command for security.
 	// Used internally by the CLI; library users typically don't set this.
 	Command string
 }
