@@ -63,6 +63,9 @@ func Execute(version string) error {
 	root.AddCommand(newServeCmd(ro))
 	root.AddCommand(newConfigCmd())
 	root.AddCommand(newRebuildCmd(ro))
+	root.AddCommand(newListCmd(ro))
+	root.AddCommand(newInfoCmd(ro))
+	root.AddCommand(newMirrorCmd(ro))
 
 	// Make download the default command when no subcommand is given
 	root.RunE = downloadCmd.RunE
@@ -80,6 +83,7 @@ func newDownloadCmd(ctx context.Context, ro *RootOpts) *cobra.Command {
 	cfg := &hfdownloader.Settings{}
 	var dryRun bool
 	var planFmt string
+	var legacy bool
 
 	cmd := &cobra.Command{
 		Use:   "download [REPO]",
@@ -89,7 +93,7 @@ func newDownloadCmd(ctx context.Context, ro *RootOpts) *cobra.Command {
 			return applySettingsDefaults(cmd, ro, cfg)
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
-			finalJob, finalCfg, err := finalize(cmd, ro, args, job, cfg)
+			finalJob, finalCfg, err := finalize(cmd, ro, args, job, cfg, legacy)
 			if err != nil {
 				return err
 			}
@@ -144,7 +148,6 @@ func newDownloadCmd(ctx context.Context, ro *RootOpts) *cobra.Command {
 	// Settings flags
 	cmd.Flags().StringVar(&cfg.CacheDir, "cache-dir", "", "HuggingFace cache directory (default: ~/.cache/huggingface or HF_HOME)")
 	cmd.Flags().StringVar(&cfg.StaleTimeout, "stale-timeout", "5m", "Timeout for stale incomplete downloads")
-	cmd.Flags().StringVarP(&cfg.OutputDir, "output", "o", "", "[DEPRECATED] Use --cache-dir instead")
 	cmd.Flags().IntVarP(&cfg.Concurrency, "connections", "c", 8, "Per-file concurrent connections for LFS range requests")
 	cmd.Flags().IntVar(&cfg.MaxActiveDownloads, "max-active", 3, "Maximum number of files downloading at once")
 	cmd.Flags().StringVar(&cfg.MultipartThreshold, "multipart-threshold", "32MiB", "Use multipart/range downloads only for files >= this size")
@@ -153,6 +156,9 @@ func newDownloadCmd(ctx context.Context, ro *RootOpts) *cobra.Command {
 	cmd.Flags().StringVar(&cfg.BackoffInitial, "backoff-initial", "400ms", "Initial retry backoff duration")
 	cmd.Flags().StringVar(&cfg.BackoffMax, "backoff-max", "10s", "Maximum retry backoff duration")
 	cmd.Flags().StringVar(&cfg.Endpoint, "endpoint", "", "Custom HuggingFace endpoint URL (e.g. https://hf-mirror.com)")
+	cmd.Flags().BoolVar(&cfg.NoManifest, "no-manifest", false, "Do not write hfd.yaml manifest file after download")
+	cmd.Flags().BoolVar(&cfg.NoFriendlyView, "no-friendly", false, "Do not create friendly view symlinks (models/, datasets/)")
+	cmd.Flags().BoolVar(&legacy, "legacy", false, "Use flat directory structure (v2.x behavior, may be removed in future)")
 
 	// CLI-only flags
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Plan only: print the file list and exit")
@@ -175,7 +181,7 @@ func signalContext(parent context.Context) (context.Context, context.CancelFunc)
 	return ctx, cancel
 }
 
-func finalize(cmd *cobra.Command, ro *RootOpts, args []string, job *hfdownloader.Job, cfg *hfdownloader.Settings) (hfdownloader.Job, hfdownloader.Settings, error) {
+func finalize(cmd *cobra.Command, ro *RootOpts, args []string, job *hfdownloader.Job, cfg *hfdownloader.Settings, legacy bool) (hfdownloader.Job, hfdownloader.Settings, error) {
 	j := *job
 	c := *cfg
 
@@ -207,15 +213,16 @@ func finalize(cmd *cobra.Command, ro *RootOpts, args []string, job *hfdownloader
 		return j, c, fmt.Errorf("invalid repo id %q (expected owner/name)", j.Repo)
 	}
 
-	// Set default output directory based on type (Models or Datasets)
-	// Only if user didn't explicitly set --output AND didn't set --cache-dir
-	// (--cache-dir enables HF cache mode, which doesn't use OutputDir)
-	if c.OutputDir == "" && c.CacheDir == "" {
+	// Legacy mode: use flat directory structure (v2.x behavior)
+	// By default (no flags), use HF cache structure
+	if legacy {
 		if j.IsDataset {
 			c.OutputDir = "Datasets"
 		} else {
 			c.OutputDir = "Models"
 		}
+		// Clear CacheDir to ensure legacy mode is used
+		c.CacheDir = ""
 	}
 
 	// Build the CLI command string for the manifest (token stripped)
