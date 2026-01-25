@@ -332,7 +332,7 @@ func (a *Analyzer) fetchMetadata(ctx context.Context, repo string, isDataset boo
 	case TypeGPTQ, TypeAWQ:
 		filesToFetch = []string{"quantize_config.json", "config.json"}
 	case TypeTransformers:
-		filesToFetch = []string{"config.json", "preprocessor_config.json", "processor_config.json"}
+		filesToFetch = []string{"config.json", "tokenizer_config.json", "generation_config.json", "preprocessor_config.json", "processor_config.json"}
 	case TypeONNX:
 		filesToFetch = []string{"config.json"}
 	default:
@@ -416,8 +416,20 @@ func (a *Analyzer) analyzeTypeSpecific(info *RepoInfo) {
 		info.Dataset = analyzeDataset(info.Files)
 	case TypeONNX:
 		info.ONNX = analyzeONNX(info.Files)
-	case TypeTransformers, TypeGeneric:
-		// For transformers/generic, try to detect specialized types from metadata
+	case TypeTransformers:
+		// For transformers, first try to detect specialized types from metadata
+		specializedType := detectSpecializedType(info.Files, info.Metadata)
+		if specializedType != "" {
+			info.Type = specializedType
+			info.TypeDescription = info.Type.Description()
+			// Re-run analysis for the specialized type
+			a.analyzeTypeSpecific(info)
+			return
+		}
+		// Standard transformers analysis
+		info.Transformers = analyzeTransformers(info.Files, info.Metadata)
+	case TypeGeneric:
+		// For generic, try to detect specialized types from metadata
 		specializedType := detectSpecializedType(info.Files, info.Metadata)
 		if specializedType != "" {
 			info.Type = specializedType

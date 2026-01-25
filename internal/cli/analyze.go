@@ -102,6 +102,8 @@ func printAnalysis(info *smartdl.RepoInfo) {
 	switch info.Type {
 	case smartdl.TypeGGUF:
 		printGGUFAnalysis(info)
+	case smartdl.TypeTransformers:
+		printTransformersAnalysis(info)
 	case smartdl.TypeDiffusers:
 		printDiffusersAnalysis(info)
 	case smartdl.TypeLoRA:
@@ -156,6 +158,108 @@ func printGGUFAnalysis(info *smartdl.RepoInfo) {
 	fmt.Println()
 	fmt.Println("Usage:")
 	fmt.Printf("  hfdownloader download %s -F <quant>  # e.g., -F q4_k_m\n", info.Repo)
+}
+
+func printTransformersAnalysis(info *smartdl.RepoInfo) {
+	if info.Transformers == nil {
+		printGenericAnalysis(info)
+		return
+	}
+
+	t := info.Transformers
+
+	// Architecture
+	if t.Architecture != "" {
+		fmt.Printf("Architecture: %s\n", t.Architecture)
+		if t.ArchitectureDescription != "" {
+			fmt.Printf("              %s\n", t.ArchitectureDescription)
+		}
+	}
+
+	// Task
+	if t.Task != "" {
+		fmt.Printf("Task:         %s\n", t.Task)
+		if t.TaskDescription != "" {
+			fmt.Printf("              %s\n", t.TaskDescription)
+		}
+	}
+	fmt.Println()
+
+	// Model specs
+	fmt.Println("Model Configuration:")
+	if t.EstimatedParameters != "" {
+		fmt.Printf("  Parameters:      ~%s\n", t.EstimatedParameters)
+	}
+	if t.HiddenSize > 0 {
+		fmt.Printf("  Hidden Size:     %d\n", t.HiddenSize)
+	}
+	if t.NumHiddenLayers > 0 {
+		fmt.Printf("  Layers:          %d\n", t.NumHiddenLayers)
+	}
+	if t.NumAttentionHeads > 0 {
+		fmt.Printf("  Attention Heads: %d\n", t.NumAttentionHeads)
+	}
+	if t.VocabSize > 0 {
+		fmt.Printf("  Vocab Size:      %d\n", t.VocabSize)
+	}
+	if t.ContextLength > 0 {
+		fmt.Printf("  Context Length:  %d tokens\n", t.ContextLength)
+	}
+	if t.Precision != "" {
+		fmt.Printf("  Precision:       %s\n", t.Precision)
+	}
+	fmt.Println()
+
+	// Sharding info
+	if t.IsSharded {
+		fmt.Printf("Sharding:     %d shards\n", t.ShardCount)
+	}
+
+	// Weight files
+	if len(t.WeightFiles) > 0 {
+		fmt.Println("Weight Files:")
+		fmt.Printf("  %-45s  %12s  %s\n", "NAME", "SIZE", "FORMAT")
+		fmt.Printf("  %-45s  %12s  %s\n", strings.Repeat("-", 45), "------------", "------")
+
+		limit := 10
+		for i, wf := range t.WeightFiles {
+			if i >= limit {
+				fmt.Printf("  ... and %d more files\n", len(t.WeightFiles)-limit)
+				break
+			}
+			name := wf.Name
+			if len(name) > 45 {
+				name = "..." + name[len(name)-42:]
+			}
+			fmt.Printf("  %-45s  %12s  %s\n", name, wf.SizeHuman, wf.Format)
+		}
+		fmt.Println()
+	}
+
+	// Tokenizer
+	if t.Tokenizer != nil && t.Tokenizer.Type != "" {
+		fmt.Println("Tokenizer:")
+		fmt.Printf("  Type:        %s\n", t.Tokenizer.Type)
+		if t.Tokenizer.VocabSize > 0 {
+			fmt.Printf("  Vocab Size:  %d\n", t.Tokenizer.VocabSize)
+		}
+		if t.Tokenizer.ModelMaxLength > 0 {
+			fmt.Printf("  Max Length:  %d\n", t.Tokenizer.ModelMaxLength)
+		}
+		if t.Tokenizer.HasChatTemplate {
+			fmt.Printf("  Chat:        yes (has chat template)\n")
+		}
+		fmt.Println()
+	}
+
+	// Compatible backends
+	if len(t.Backends) > 0 {
+		fmt.Printf("Backends:     %s\n", strings.Join(t.Backends, ", "))
+		fmt.Println()
+	}
+
+	fmt.Println("Usage:")
+	fmt.Printf("  hfdownloader download %s\n", info.Repo)
 }
 
 func printDiffusersAnalysis(info *smartdl.RepoInfo) {

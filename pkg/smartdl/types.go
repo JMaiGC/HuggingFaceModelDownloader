@@ -171,15 +171,16 @@ type RepoInfo struct {
 	Metadata map[string]interface{} `json:"metadata,omitempty"`
 
 	// Type-specific information (only one will be populated based on Type)
-	GGUF       *GGUFInfo       `json:"gguf,omitempty"`
-	Diffusers  *DiffusersInfo  `json:"diffusers,omitempty"`
-	LoRA       *LoRAInfo       `json:"lora,omitempty"`
-	Quantized  *QuantizedInfo  `json:"quantized,omitempty"`
-	Dataset    *DatasetInfo    `json:"dataset,omitempty"`
-	Audio      *AudioInfo      `json:"audio,omitempty"`
-	Vision     *VisionInfo     `json:"vision,omitempty"`
-	Multimodal *MultimodalInfo `json:"multimodal,omitempty"`
-	ONNX       *ONNXInfo       `json:"onnx,omitempty"`
+	GGUF         *GGUFInfo         `json:"gguf,omitempty"`
+	Transformers *TransformersInfo `json:"transformers,omitempty"`
+	Diffusers    *DiffusersInfo    `json:"diffusers,omitempty"`
+	LoRA         *LoRAInfo         `json:"lora,omitempty"`
+	Quantized    *QuantizedInfo    `json:"quantized,omitempty"`
+	Dataset      *DatasetInfo      `json:"dataset,omitempty"`
+	Audio        *AudioInfo        `json:"audio,omitempty"`
+	Vision       *VisionInfo       `json:"vision,omitempty"`
+	Multimodal   *MultimodalInfo   `json:"multimodal,omitempty"`
+	ONNX         *ONNXInfo         `json:"onnx,omitempty"`
 }
 
 // GGUFInfo contains GGUF-specific analysis results.
@@ -516,4 +517,130 @@ type ONNXModel struct {
 
 	// Optimized indicates if this is an optimized model.
 	Optimized bool `json:"optimized,omitempty"`
+}
+
+// TransformersInfo contains detailed Transformers model analysis results.
+type TransformersInfo struct {
+	// Architecture is the model architecture class (e.g., "LlamaForCausalLM", "BertForSequenceClassification").
+	Architecture string `json:"architecture"`
+
+	// ArchitectureDescription is a human-readable description of the architecture.
+	ArchitectureDescription string `json:"architecture_description,omitempty"`
+
+	// Task is the primary task the model is designed for.
+	Task string `json:"task,omitempty"`
+
+	// TaskDescription is a human-readable description of the task.
+	TaskDescription string `json:"task_description,omitempty"`
+
+	// ModelType is the model type identifier (e.g., "llama", "bert", "gpt2").
+	ModelType string `json:"model_type,omitempty"`
+
+	// HiddenSize is the dimensionality of the hidden layers.
+	HiddenSize int `json:"hidden_size,omitempty"`
+
+	// NumHiddenLayers is the number of hidden layers.
+	NumHiddenLayers int `json:"num_hidden_layers,omitempty"`
+
+	// NumAttentionHeads is the number of attention heads.
+	NumAttentionHeads int `json:"num_attention_heads,omitempty"`
+
+	// IntermediateSize is the size of the intermediate (feed-forward) layer.
+	IntermediateSize int `json:"intermediate_size,omitempty"`
+
+	// VocabSize is the vocabulary size.
+	VocabSize int `json:"vocab_size,omitempty"`
+
+	// MaxPositionEmbeddings is the maximum sequence length.
+	MaxPositionEmbeddings int `json:"max_position_embeddings,omitempty"`
+
+	// ContextLength is the effective context window (may differ from max_position_embeddings).
+	ContextLength int `json:"context_length,omitempty"`
+
+	// EstimatedParameters is the estimated parameter count string (e.g., "7B", "70B").
+	EstimatedParameters string `json:"estimated_parameters,omitempty"`
+
+	// EstimatedParametersNum is the estimated parameter count as a number.
+	EstimatedParametersNum int64 `json:"estimated_parameters_num,omitempty"`
+
+	// Precision is the detected model precision (e.g., "fp32", "fp16", "bf16").
+	Precision string `json:"precision,omitempty"`
+
+	// IsSharded indicates if the model is split across multiple files.
+	IsSharded bool `json:"is_sharded,omitempty"`
+
+	// ShardCount is the number of shards if sharded.
+	ShardCount int `json:"shard_count,omitempty"`
+
+	// WeightFiles lists the model weight files.
+	WeightFiles []WeightFile `json:"weight_files,omitempty"`
+
+	// Tokenizer contains tokenizer information.
+	Tokenizer *TokenizerInfo `json:"tokenizer,omitempty"`
+
+	// TorchDtype is the torch dtype from config (e.g., "float16", "bfloat16").
+	TorchDtype string `json:"torch_dtype,omitempty"`
+
+	// Backends lists compatible inference backends.
+	Backends []string `json:"backends,omitempty"`
+
+	// SpecialTokens contains special token information.
+	SpecialTokens map[string]interface{} `json:"special_tokens,omitempty"`
+
+	// GenerationConfig contains generation configuration if present.
+	GenerationConfig map[string]interface{} `json:"generation_config,omitempty"`
+}
+
+// WeightFile represents a model weight file.
+type WeightFile struct {
+	// Path is the file path.
+	Path string `json:"path"`
+
+	// Name is the filename.
+	Name string `json:"name"`
+
+	// Size is the file size in bytes.
+	Size int64 `json:"size"`
+
+	// SizeHuman is the human-readable size.
+	SizeHuman string `json:"size_human"`
+
+	// Format is the file format (safetensors, bin, pt).
+	Format string `json:"format"`
+
+	// ShardIndex is the shard index (0-based) if sharded.
+	ShardIndex int `json:"shard_index,omitempty"`
+
+	// ShardTotal is the total number of shards.
+	ShardTotal int `json:"shard_total,omitempty"`
+}
+
+// TokenizerInfo contains tokenizer details.
+type TokenizerInfo struct {
+	// Type is the tokenizer class (e.g., "LlamaTokenizerFast", "GPT2Tokenizer").
+	Type string `json:"type,omitempty"`
+
+	// VocabSize is the vocabulary size.
+	VocabSize int `json:"vocab_size,omitempty"`
+
+	// ModelMaxLength is the maximum input length.
+	ModelMaxLength int `json:"model_max_length,omitempty"`
+
+	// PaddingSide is the padding side ("left" or "right").
+	PaddingSide string `json:"padding_side,omitempty"`
+
+	// TruncationSide is the truncation side.
+	TruncationSide string `json:"truncation_side,omitempty"`
+
+	// AddBosToken indicates if BOS token is added.
+	AddBosToken bool `json:"add_bos_token,omitempty"`
+
+	// AddEosToken indicates if EOS token is added.
+	AddEosToken bool `json:"add_eos_token,omitempty"`
+
+	// ChatTemplate is the chat template string if present.
+	ChatTemplate string `json:"chat_template,omitempty"`
+
+	// HasChatTemplate indicates if a chat template is defined.
+	HasChatTemplate bool `json:"has_chat_template,omitempty"`
 }
