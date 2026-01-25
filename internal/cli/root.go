@@ -66,6 +66,7 @@ func Execute(version string) error {
 	root.AddCommand(newListCmd(ro))
 	root.AddCommand(newInfoCmd(ro))
 	root.AddCommand(newMirrorCmd(ro))
+	root.AddCommand(newAnalyzeCmd(ctx, ro))
 
 	// Make download the default command when no subcommand is given
 	root.RunE = downloadCmd.RunE
@@ -84,6 +85,7 @@ func newDownloadCmd(ctx context.Context, ro *RootOpts) *cobra.Command {
 	var dryRun bool
 	var planFmt string
 	var legacy bool
+	var legacyOutput string
 
 	cmd := &cobra.Command{
 		Use:   "download [REPO]",
@@ -93,7 +95,7 @@ func newDownloadCmd(ctx context.Context, ro *RootOpts) *cobra.Command {
 			return applySettingsDefaults(cmd, ro, cfg)
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
-			finalJob, finalCfg, err := finalize(cmd, ro, args, job, cfg, legacy)
+			finalJob, finalCfg, err := finalize(cmd, ro, args, job, cfg, legacy, legacyOutput)
 			if err != nil {
 				return err
 			}
@@ -159,6 +161,7 @@ func newDownloadCmd(ctx context.Context, ro *RootOpts) *cobra.Command {
 	cmd.Flags().BoolVar(&cfg.NoManifest, "no-manifest", false, "Do not write hfd.yaml manifest file after download")
 	cmd.Flags().BoolVar(&cfg.NoFriendlyView, "no-friendly", false, "Do not create friendly view symlinks (models/, datasets/)")
 	cmd.Flags().BoolVar(&legacy, "legacy", false, "Use flat directory structure (v2.x behavior, may be removed in future)")
+	cmd.Flags().StringVarP(&legacyOutput, "output", "o", "", "Output directory for --legacy mode only (default: Models/ or Datasets/). DEPRECATED: may be removed in future")
 
 	// CLI-only flags
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Plan only: print the file list and exit")
@@ -181,7 +184,7 @@ func signalContext(parent context.Context) (context.Context, context.CancelFunc)
 	return ctx, cancel
 }
 
-func finalize(cmd *cobra.Command, ro *RootOpts, args []string, job *hfdownloader.Job, cfg *hfdownloader.Settings, legacy bool) (hfdownloader.Job, hfdownloader.Settings, error) {
+func finalize(cmd *cobra.Command, ro *RootOpts, args []string, job *hfdownloader.Job, cfg *hfdownloader.Settings, legacy bool, legacyOutput string) (hfdownloader.Job, hfdownloader.Settings, error) {
 	j := *job
 	c := *cfg
 
@@ -216,13 +219,17 @@ func finalize(cmd *cobra.Command, ro *RootOpts, args []string, job *hfdownloader
 	// Legacy mode: use flat directory structure (v2.x behavior)
 	// By default (no flags), use HF cache structure
 	if legacy {
-		if j.IsDataset {
+		if legacyOutput != "" {
+			c.OutputDir = legacyOutput
+		} else if j.IsDataset {
 			c.OutputDir = "Datasets"
 		} else {
 			c.OutputDir = "Models"
 		}
 		// Clear CacheDir to ensure legacy mode is used
 		c.CacheDir = ""
+	} else if legacyOutput != "" {
+		return j, c, fmt.Errorf("--output requires --legacy flag (v2.x compatibility mode)")
 	}
 
 	// Build the CLI command string for the manifest (token stripped)
@@ -253,6 +260,12 @@ func buildCommandString(cmd *cobra.Command, job hfdownloader.Job, cfg hfdownload
 	}
 	if cfg.CacheDir != "" {
 		parts = append(parts, "--cache-dir", cfg.CacheDir)
+	}
+	// Legacy mode output directory
+	if cfg.OutputDir != "" && cfg.OutputDir != "Models" && cfg.OutputDir != "Datasets" {
+		parts = append(parts, "--legacy", "-o", cfg.OutputDir)
+	} else if cfg.OutputDir == "Models" || cfg.OutputDir == "Datasets" {
+		parts = append(parts, "--legacy")
 	}
 	if cfg.Concurrency != 8 {
 		parts = append(parts, "-c", fmt.Sprintf("%d", cfg.Concurrency))

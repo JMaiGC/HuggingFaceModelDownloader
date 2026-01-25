@@ -375,6 +375,7 @@ func newMirrorPushCmd(ro *RootOpts) *cobra.Command {
 	var dryRun bool
 	var verify bool
 	var deleteExtra bool
+	var force bool
 
 	cmd := &cobra.Command{
 		Use:   "push <target>",
@@ -383,13 +384,15 @@ func newMirrorPushCmd(ro *RootOpts) *cobra.Command {
 
 Only copies repos that are missing in target.
 Use --repo to filter specific repos.
+Use --force to re-copy incomplete or outdated repos.
 
 Examples:
   hfdownloader mirror push office                  # Push all missing repos
   hfdownloader mirror push office --repo Mistral   # Push repos matching "Mistral"
   hfdownloader mirror push office --dry-run        # Show what would be copied
   hfdownloader mirror push office --verify         # Verify integrity after copy
-  hfdownloader mirror push office --delete         # Remove repos from target not in local`,
+  hfdownloader mirror push office --delete         # Remove repos from target not in local
+  hfdownloader mirror push office --force          # Re-copy incomplete repos`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			targetRef := args[0]
@@ -404,7 +407,7 @@ Examples:
 				cacheDir = hfdownloader.DefaultCacheDir()
 			}
 
-			return mirrorSync(cacheDir, targetPath, repoFilter, dryRun, verify, deleteExtra, ro.Quiet)
+			return mirrorSync(cacheDir, targetPath, repoFilter, dryRun, verify, deleteExtra, force, ro.Quiet)
 		},
 	}
 
@@ -413,6 +416,7 @@ Examples:
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Show what would be copied without copying")
 	cmd.Flags().BoolVar(&verify, "verify", false, "Verify blob integrity after copy (SHA256)")
 	cmd.Flags().BoolVar(&deleteExtra, "delete", false, "Delete repos in target that are not in source")
+	cmd.Flags().BoolVar(&force, "force", false, "Re-copy incomplete or outdated repos")
 
 	return cmd
 }
@@ -423,6 +427,7 @@ func newMirrorPullCmd(ro *RootOpts) *cobra.Command {
 	var dryRun bool
 	var verify bool
 	var deleteExtra bool
+	var force bool
 
 	cmd := &cobra.Command{
 		Use:   "pull <target>",
@@ -431,13 +436,15 @@ func newMirrorPullCmd(ro *RootOpts) *cobra.Command {
 
 Only copies repos that are missing locally.
 Use --repo to filter specific repos.
+Use --force to re-copy incomplete or outdated repos.
 
 Examples:
   hfdownloader mirror pull office                  # Pull all missing repos
   hfdownloader mirror pull office --repo Mistral   # Pull repos matching "Mistral"
   hfdownloader mirror pull office --dry-run        # Show what would be copied
   hfdownloader mirror pull office --verify         # Verify integrity after copy
-  hfdownloader mirror pull office --delete         # Remove local repos not in target`,
+  hfdownloader mirror pull office --delete         # Remove local repos not in target
+  hfdownloader mirror pull office --force          # Re-copy incomplete repos`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			targetRef := args[0]
@@ -453,7 +460,7 @@ Examples:
 			}
 
 			// Pull is just push in reverse
-			return mirrorSync(targetPath, cacheDir, repoFilter, dryRun, verify, deleteExtra, ro.Quiet)
+			return mirrorSync(targetPath, cacheDir, repoFilter, dryRun, verify, deleteExtra, force, ro.Quiet)
 		},
 	}
 
@@ -462,12 +469,19 @@ Examples:
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Show what would be copied without copying")
 	cmd.Flags().BoolVar(&verify, "verify", false, "Verify blob integrity after copy (SHA256)")
 	cmd.Flags().BoolVar(&deleteExtra, "delete", false, "Delete local repos that are not in target")
+	cmd.Flags().BoolVar(&force, "force", false, "Re-copy incomplete or outdated repos")
 
 	return cmd
 }
 
+// syncEntry represents a repo to be synced with its reason.
+type syncEntry struct {
+	ListEntry
+	Reason string // "missing", "incomplete", "outdated"
+}
+
 // mirrorSync copies repos from source to destination.
-func mirrorSync(srcCache, dstCache, repoFilter string, dryRun, verify, deleteExtra, quiet bool) error {
+func mirrorSync(srcCache, dstCache, repoFilter string, dryRun, verify, deleteExtra, force, quiet bool) error {
 	// Scan source
 	srcEntries, err := scanCacheStructure(srcCache, "")
 	if err != nil {
@@ -492,13 +506,23 @@ func mirrorSync(srcCache, dstCache, repoFilter string, dryRun, verify, deleteExt
 	}
 
 	// Find repos to copy
-	var toCopy []ListEntry
+	var toCopy []syncEntry
 	for _, e := range srcEntries {
 		if repoFilter != "" && !strings.Contains(strings.ToLower(e.Repo), strings.ToLower(repoFilter)) {
 			continue
 		}
+
 		if _, ok := dstMap[e.Repo]; !ok {
-			toCopy = append(toCopy, e)
+			// Missing in destination
+			toCopy = append(toCopy, syncEntry{ListEntry: e, Reason: "missing"})
+		} else if force {
+			// Check if destination is incomplete or outdated
+			relPath, _ := filepath.Rel(srcCache, e.Path)
+			dstPath := filepath.Join(dstCache, relPath)
+			needsUpdate, reason := compareRepoIntegrity(e.Path, dstPath)
+			if needsUpdate && reason != "missing" {
+				toCopy = append(toCopy, syncEntry{ListEntry: e, Reason: reason})
+			}
 		}
 	}
 
@@ -537,7 +561,11 @@ func mirrorSync(srcCache, dstCache, repoFilter string, dryRun, verify, deleteExt
 		if len(toCopy) > 0 {
 			fmt.Printf("Will copy %d repos (%s):\n", len(toCopy), humanSize(totalCopySize))
 			for _, e := range toCopy {
-				fmt.Printf("  + %s (%s)\n", e.Repo, humanSize(e.Size))
+				if e.Reason != "missing" {
+					fmt.Printf("  + %s (%s) [%s]\n", e.Repo, humanSize(e.Size), e.Reason)
+				} else {
+					fmt.Printf("  + %s (%s)\n", e.Repo, humanSize(e.Size))
+				}
 			}
 		}
 		if len(toDelete) > 0 {
@@ -557,7 +585,18 @@ func mirrorSync(srcCache, dstCache, repoFilter string, dryRun, verify, deleteExt
 	// Copy each repo
 	for i, e := range toCopy {
 		if !quiet {
-			fmt.Printf("[%d/%d] Copying %s...\n", i+1, len(toCopy), e.Repo)
+			if e.Reason != "missing" {
+				fmt.Printf("[%d/%d] Copying %s (%s)...\n", i+1, len(toCopy), e.Repo, e.Reason)
+			} else {
+				fmt.Printf("[%d/%d] Copying %s...\n", i+1, len(toCopy), e.Repo)
+			}
+		}
+
+		// For incomplete/outdated repos, remove destination first
+		if e.Reason == "incomplete" || e.Reason == "outdated" {
+			relPath, _ := filepath.Rel(srcCache, e.Path)
+			dstPath := filepath.Join(dstCache, relPath)
+			os.RemoveAll(dstPath)
 		}
 
 		if err := copyRepoCache(e.Path, srcCache, dstCache); err != nil {
@@ -704,4 +743,100 @@ func verifyRepoCache(repoPath, srcCache, dstCache string) error {
 
 		return nil
 	})
+}
+
+// RepoIntegrity represents the integrity status of a repo.
+type RepoIntegrity struct {
+	Complete     bool     `json:"complete"`
+	HasRefs      bool     `json:"has_refs"`
+	HasBlobs     bool     `json:"has_blobs"`
+	HasSnapshots bool     `json:"has_snapshots"`
+	BlobCount    int      `json:"blob_count"`
+	MissingBlobs []string `json:"missing_blobs,omitempty"`
+	Errors       []string `json:"errors,omitempty"`
+}
+
+// checkRepoIntegrity checks if a repo cache is complete and valid.
+func checkRepoIntegrity(repoPath string) RepoIntegrity {
+	result := RepoIntegrity{Complete: true}
+
+	// Check refs directory
+	refsDir := filepath.Join(repoPath, "refs")
+	if entries, err := os.ReadDir(refsDir); err == nil && len(entries) > 0 {
+		result.HasRefs = true
+	} else {
+		result.Complete = false
+		result.Errors = append(result.Errors, "missing or empty refs/")
+	}
+
+	// Check blobs directory
+	blobsDir := filepath.Join(repoPath, "blobs")
+	if entries, err := os.ReadDir(blobsDir); err == nil && len(entries) > 0 {
+		result.HasBlobs = true
+		result.BlobCount = len(entries)
+	} else {
+		result.Complete = false
+		result.Errors = append(result.Errors, "missing or empty blobs/")
+	}
+
+	// Check snapshots directory
+	snapshotsDir := filepath.Join(repoPath, "snapshots")
+	if entries, err := os.ReadDir(snapshotsDir); err == nil && len(entries) > 0 {
+		result.HasSnapshots = true
+
+		// Check if snapshot symlinks point to existing blobs
+		for _, entry := range entries {
+			snapshotPath := filepath.Join(snapshotsDir, entry.Name())
+			filepath.Walk(snapshotPath, func(path string, info os.FileInfo, err error) error {
+				if err != nil {
+					return nil
+				}
+				if info.Mode()&os.ModeSymlink != 0 {
+					target, err := os.Readlink(path)
+					if err != nil {
+						result.Errors = append(result.Errors, fmt.Sprintf("broken symlink: %s", path))
+						result.Complete = false
+						return nil
+					}
+					// Resolve relative symlink
+					absTarget := filepath.Join(filepath.Dir(path), target)
+					if _, err := os.Stat(absTarget); os.IsNotExist(err) {
+						blobName := filepath.Base(target)
+						result.MissingBlobs = append(result.MissingBlobs, blobName)
+						result.Complete = false
+					}
+				}
+				return nil
+			})
+		}
+	} else {
+		result.Complete = false
+		result.Errors = append(result.Errors, "missing or empty snapshots/")
+	}
+
+	return result
+}
+
+// compareRepoIntegrity compares source and destination repos.
+// Returns true if destination needs to be updated.
+func compareRepoIntegrity(srcPath, dstPath string) (needsUpdate bool, reason string) {
+	// Check if destination exists
+	if _, err := os.Stat(dstPath); os.IsNotExist(err) {
+		return true, "missing"
+	}
+
+	srcIntegrity := checkRepoIntegrity(srcPath)
+	dstIntegrity := checkRepoIntegrity(dstPath)
+
+	// If destination is incomplete, it needs update
+	if !dstIntegrity.Complete {
+		return true, "incomplete"
+	}
+
+	// If source has more blobs, destination needs update
+	if srcIntegrity.BlobCount > dstIntegrity.BlobCount {
+		return true, "outdated"
+	}
+
+	return false, ""
 }
