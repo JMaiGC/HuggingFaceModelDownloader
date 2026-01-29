@@ -110,30 +110,33 @@
   }
 
   function handleWSMessage(msg) {
-    if (msg.type === 'job_update' || msg.type === 'progress') {
-      updateJobFromWS(msg);
-    }
-  }
-
-  function updateJobFromWS(msg) {
-    if (msg.jobId) {
-      const job = state.jobs.get(msg.jobId) || { id: msg.jobId };
-      Object.assign(job, msg);
-      state.jobs.set(msg.jobId, job);
-
-      // Update badge
+    if (msg.type === 'init') {
+      // Initial state with all jobs
+      const jobs = msg.data?.jobs || [];
+      state.jobs.clear();
+      jobs.forEach(job => {
+        state.jobs.set(job.id, job);
+      });
       updateJobsBadge();
-
-      // Re-render if on jobs page
       if (state.currentPage === 'jobs') {
         renderJobs();
+      }
+    } else if (msg.type === 'job_update') {
+      // Job update - data contains the full job object
+      const job = msg.data;
+      if (job && job.id) {
+        state.jobs.set(job.id, job);
+        updateJobsBadge();
+        if (state.currentPage === 'jobs') {
+          renderJobs();
+        }
       }
     }
   }
 
   function updateJobsBadge() {
     const activeCount = Array.from(state.jobs.values())
-      .filter(j => j.status === 'downloading' || j.status === 'queued').length;
+      .filter(j => j.status === 'running' || j.status === 'queued').length;
 
     const badge = $('#jobsBadge');
     if (badge) {
