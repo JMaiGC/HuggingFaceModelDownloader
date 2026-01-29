@@ -95,10 +95,10 @@ func (m *JobManager) CreateJob(req DownloadRequest) (*Job, bool, error) {
 		revision = "main"
 	}
 
-	// Determine output directory based on type (NOT from request for security)
-	outputDir := m.config.ModelsDir
-	if req.Dataset {
-		outputDir = m.config.DatasetsDir
+	// Use HuggingFace cache directory (v3 mode)
+	cacheDir := m.config.CacheDir
+	if cacheDir == "" {
+		cacheDir = hfdownloader.DefaultCacheDir()
 	}
 
 	// Check for existing active job with same repo+revision+type
@@ -120,7 +120,7 @@ func (m *JobManager) CreateJob(req DownloadRequest) (*Job, bool, error) {
 		IsDataset: req.Dataset,
 		Filters:   req.Filters,
 		Excludes:  req.Excludes,
-		OutputDir: outputDir, // Server-controlled, not from request
+		OutputDir: cacheDir, // HuggingFace cache directory
 		Status:    JobStatusQueued,
 		CreatedAt: time.Now(),
 		Progress:  JobProgress{},
@@ -262,8 +262,14 @@ func (m *JobManager) runJob(job *Job) {
 		AppendFilterSubdir: false,
 	}
 
+	// Use HuggingFace cache structure (v3 mode) instead of legacy OutputDir
+	cacheDir := m.config.CacheDir
+	if cacheDir == "" {
+		cacheDir = hfdownloader.DefaultCacheDir()
+	}
+
 	settings := hfdownloader.Settings{
-		OutputDir:          job.OutputDir,
+		CacheDir:           cacheDir, // Use HF cache structure
 		Concurrency:        m.config.Concurrency,
 		MaxActiveDownloads: m.config.MaxActive,
 		Token:              m.config.Token,

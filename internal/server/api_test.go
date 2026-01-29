@@ -11,12 +11,16 @@ import (
 	"testing"
 )
 
+var testCacheDir string
+
 func newTestServer() *Server {
+	if testCacheDir == "" {
+		testCacheDir = "/tmp/hfdownloader_test_cache"
+	}
 	cfg := Config{
 		Addr:        "127.0.0.1",
 		Port:        0, // Random port
-		ModelsDir:   "./test_models",
-		DatasetsDir: "./test_datasets",
+		CacheDir:    testCacheDir,
 		Concurrency: 2,
 		MaxActive:   1,
 	}
@@ -61,18 +65,15 @@ func TestAPI_GetSettings(t *testing.T) {
 	var resp SettingsResponse
 	json.Unmarshal(w.Body.Bytes(), &resp)
 
-	if resp.ModelsDir != "./test_models" {
-		t.Errorf("Expected modelsDir ./test_models, got %s", resp.ModelsDir)
-	}
-	if resp.DatasetsDir != "./test_datasets" {
-		t.Errorf("Expected datasetsDir ./test_datasets, got %s", resp.DatasetsDir)
+	if resp.CacheDir != testCacheDir {
+		t.Errorf("Expected cacheDir %s, got %s", testCacheDir, resp.CacheDir)
 	}
 }
 
 func TestAPI_GetSettings_TokenMasked(t *testing.T) {
 	cfg := Config{
-		ModelsDir: "./test",
-		Token:     "hf_abcdefghijklmnop",
+		CacheDir: "/tmp/test_cache",
+		Token:    "hf_abcdefghijklmnop",
 	}
 	srv := New(cfg)
 
@@ -117,21 +118,21 @@ func TestAPI_UpdateSettings(t *testing.T) {
 	}
 }
 
-func TestAPI_UpdateSettings_CantChangeOutputDir(t *testing.T) {
+func TestAPI_UpdateSettings_CantChangeCacheDir(t *testing.T) {
 	srv := newTestServer()
-	originalModels := srv.config.ModelsDir
+	originalCache := srv.config.CacheDir
 
-	// Try to inject a different output path (should be ignored)
-	body := `{"modelsDir": "/etc/passwd", "datasetsDir": "/tmp/evil"}`
+	// Try to inject a different cache path (should be ignored)
+	body := `{"cacheDir": "/etc/passwd"}`
 	req := httptest.NewRequest("POST", "/api/settings", bytes.NewBufferString(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 
 	srv.handleUpdateSettings(w, req)
 
-	// Paths should NOT have changed
-	if srv.config.ModelsDir != originalModels {
-		t.Errorf("ModelsDir should not be changeable via API! Got %s", srv.config.ModelsDir)
+	// Path should NOT have changed
+	if srv.config.CacheDir != originalCache {
+		t.Errorf("CacheDir should not be changeable via API! Got %s", srv.config.CacheDir)
 	}
 }
 
@@ -193,16 +194,16 @@ func TestAPI_StartDownload_OutputIgnored(t *testing.T) {
 	var resp Job
 	json.Unmarshal(w.Body.Bytes(), &resp)
 
-	// Output should be server-controlled, not from request
+	// Output should be server-controlled (HF cache), not from request
 	if resp.OutputDir == "/etc/evil" {
 		t.Error("Output path from request should be ignored!")
 	}
-	if resp.OutputDir != "./test_models" {
-		t.Errorf("Expected server-controlled output, got %s", resp.OutputDir)
+	if resp.OutputDir != testCacheDir {
+		t.Errorf("Expected server-controlled HF cache output, got %s", resp.OutputDir)
 	}
 }
 
-func TestAPI_StartDownload_DatasetUsesDatasetDir(t *testing.T) {
+func TestAPI_StartDownload_DatasetUsesSameCacheDir(t *testing.T) {
 	srv := newTestServer()
 
 	body := `{"repo": "test/dataset", "dataset": true}`
@@ -215,8 +216,9 @@ func TestAPI_StartDownload_DatasetUsesDatasetDir(t *testing.T) {
 	var resp Job
 	json.Unmarshal(w.Body.Bytes(), &resp)
 
-	if resp.OutputDir != "./test_datasets" {
-		t.Errorf("Dataset should use datasets dir, got %s", resp.OutputDir)
+	// In v3, both models and datasets use the same HF cache directory
+	if resp.OutputDir != testCacheDir {
+		t.Errorf("Dataset should use HF cache dir, got %s", resp.OutputDir)
 	}
 }
 

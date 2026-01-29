@@ -9,18 +9,18 @@ import (
 )
 
 func TestJobManager_CreateJob(t *testing.T) {
+	testCacheDir := t.TempDir()
 	cfg := Config{
-		ModelsDir:   "./test_models",
-		DatasetsDir: "./test_datasets",
+		CacheDir:    testCacheDir,
 		Concurrency: 2,
 		MaxActive:   1,
 	}
 	hub := NewWSHub()
 	go hub.Run()
-	
+
 	mgr := NewJobManager(cfg, hub)
 
-	t.Run("creates model job with server-controlled output", func(t *testing.T) {
+	t.Run("creates model job with HF cache output", func(t *testing.T) {
 		req := DownloadRequest{
 			Repo:     "test/model",
 			Revision: "main",
@@ -34,15 +34,15 @@ func TestJobManager_CreateJob(t *testing.T) {
 		if wasExisting {
 			t.Error("Expected new job, got existing")
 		}
-		if job.OutputDir != "./test_models" {
-			t.Errorf("Expected output ./test_models, got %s", job.OutputDir)
+		if job.OutputDir != testCacheDir {
+			t.Errorf("Expected output %s, got %s", testCacheDir, job.OutputDir)
 		}
 		if job.IsDataset {
 			t.Error("Expected model, got dataset")
 		}
 	})
 
-	t.Run("creates dataset job with server-controlled output", func(t *testing.T) {
+	t.Run("creates dataset job with HF cache output", func(t *testing.T) {
 		req := DownloadRequest{
 			Repo:    "test/dataset",
 			Dataset: true,
@@ -52,8 +52,9 @@ func TestJobManager_CreateJob(t *testing.T) {
 		if err != nil {
 			t.Fatalf("CreateJob failed: %v", err)
 		}
-		if job.OutputDir != "./test_datasets" {
-			t.Errorf("Expected output ./test_datasets, got %s", job.OutputDir)
+		// Both models and datasets use same cache dir in v3
+		if job.OutputDir != testCacheDir {
+			t.Errorf("Expected output %s, got %s", testCacheDir, job.OutputDir)
 		}
 		if !job.IsDataset {
 			t.Error("Expected dataset, got model")
@@ -74,11 +75,11 @@ func TestJobManager_CreateJob(t *testing.T) {
 
 func TestJobManager_Deduplication(t *testing.T) {
 	cfg := Config{
-		ModelsDir: "./test_models",
+		CacheDir: t.TempDir(),
 	}
 	hub := NewWSHub()
 	go hub.Run()
-	
+
 	mgr := NewJobManager(cfg, hub)
 
 	// Create first job
@@ -104,11 +105,11 @@ func TestJobManager_Deduplication(t *testing.T) {
 
 func TestJobManager_DifferentRevisionsNotDeduplicated(t *testing.T) {
 	cfg := Config{
-		ModelsDir: "./test_models",
+		CacheDir: t.TempDir(),
 	}
 	hub := NewWSHub()
 	go hub.Run()
-	
+
 	mgr := NewJobManager(cfg, hub)
 
 	job1, _, _ := mgr.CreateJob(DownloadRequest{
@@ -131,12 +132,11 @@ func TestJobManager_DifferentRevisionsNotDeduplicated(t *testing.T) {
 
 func TestJobManager_ModelVsDatasetNotDeduplicated(t *testing.T) {
 	cfg := Config{
-		ModelsDir:   "./test_models",
-		DatasetsDir: "./test_datasets",
+		CacheDir: t.TempDir(),
 	}
 	hub := NewWSHub()
 	go hub.Run()
-	
+
 	mgr := NewJobManager(cfg, hub)
 
 	job1, _, _ := mgr.CreateJob(DownloadRequest{
@@ -158,7 +158,7 @@ func TestJobManager_ModelVsDatasetNotDeduplicated(t *testing.T) {
 }
 
 func TestJobManager_GetJob(t *testing.T) {
-	cfg := Config{ModelsDir: "./test"}
+	cfg := Config{CacheDir: t.TempDir()}
 	hub := NewWSHub()
 	go hub.Run()
 	mgr := NewJobManager(cfg, hub)
@@ -184,7 +184,7 @@ func TestJobManager_GetJob(t *testing.T) {
 }
 
 func TestJobManager_ListJobs(t *testing.T) {
-	cfg := Config{ModelsDir: "./test"}
+	cfg := Config{CacheDir: t.TempDir()}
 	hub := NewWSHub()
 	go hub.Run()
 	mgr := NewJobManager(cfg, hub)
@@ -201,7 +201,7 @@ func TestJobManager_ListJobs(t *testing.T) {
 }
 
 func TestJobManager_CancelJob(t *testing.T) {
-	cfg := Config{ModelsDir: "./test"}
+	cfg := Config{CacheDir: t.TempDir()}
 	hub := NewWSHub()
 	go hub.Run()
 	mgr := NewJobManager(cfg, hub)

@@ -47,8 +47,7 @@ type PlanFile struct {
 // SettingsResponse represents current settings.
 type SettingsResponse struct {
 	Token              string `json:"token,omitempty"`
-	ModelsDir          string `json:"modelsDir"`
-	DatasetsDir        string `json:"datasetsDir"`
+	CacheDir           string `json:"cacheDir"`
 	Concurrency        int    `json:"connections"`
 	MaxActive          int    `json:"maxActive"`
 	MultipartThreshold string `json:"multipartThreshold"`
@@ -288,10 +287,14 @@ func (s *Server) handleGetSettings(w http.ResponseWriter, r *http.Request) {
 		tokenStatus = "********" + s.config.Token[max(0, len(s.config.Token)-4):]
 	}
 
+	cacheDir := s.config.CacheDir
+	if cacheDir == "" {
+		cacheDir = hfdownloader.DefaultCacheDir()
+	}
+
 	resp := SettingsResponse{
 		Token:              tokenStatus,
-		ModelsDir:          s.config.ModelsDir,
-		DatasetsDir:        s.config.DatasetsDir,
+		CacheDir:           cacheDir,
 		Concurrency:        s.config.Concurrency,
 		MaxActive:          s.config.MaxActive,
 		MultipartThreshold: s.config.MultipartThreshold,

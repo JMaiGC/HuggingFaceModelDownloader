@@ -500,7 +500,11 @@
     }
 
     container.innerHTML = jobs.map(job => {
-      const progress = job.progress || 0;
+      const p = job.progress || {};
+      const totalBytes = p.totalBytes || 0;
+      const downloadedBytes = p.downloadedBytes || 0;
+      const progress = totalBytes > 0 ? (downloadedBytes / totalBytes * 100) : 0;
+      const speed = p.bytesPerSecond || 0;
       const status = job.status || 'queued';
 
       return `
@@ -519,8 +523,9 @@
           </div>
           <div class="job-stats">
             <span>${progress.toFixed(1)}%</span>
-            ${job.speed ? `<span>${formatBytes(job.speed)}/s</span>` : ''}
-            ${job.downloaded && job.total ? `<span>${formatBytes(job.downloaded)} / ${formatBytes(job.total)}</span>` : ''}
+            ${speed > 0 ? `<span>${formatBytes(speed)}/s</span>` : ''}
+            <span>${formatBytes(downloadedBytes)} / ${formatBytes(totalBytes)}</span>
+            <span>${p.completedFiles || 0} / ${p.totalFiles || 0} files</span>
           </div>
         </div>
       `;
@@ -626,6 +631,12 @@
     try {
       const data = await api('GET', '/settings');
       state.settings = data;
+
+      // Display cache directory (read-only)
+      const cacheDirEl = $('#cacheDir');
+      if (cacheDirEl) {
+        cacheDirEl.textContent = data.cacheDir || '~/.cache/huggingface';
+      }
 
       $('#hfToken').value = data.token || '';
       $('#connections').value = data.connections || 8;
