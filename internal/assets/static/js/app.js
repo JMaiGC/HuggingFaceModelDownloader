@@ -1,6 +1,5 @@
 /**
- * HF Downloader - Web UI
- * Terminal Noir Edition
+ * HF Downloader - Modern Web UI
  */
 
 (function() {
@@ -9,859 +8,712 @@
   // =========================================
   // State
   // =========================================
-  
+
   const state = {
-    activeDownloads: new Map(),
-    settings: {
-      token: '',
-      connections: 8,
-      maxActive: 3,
-      multipartThreshold: '32MiB',
-      retries: 4,
-      verify: 'size'
-    },
+    jobs: new Map(),
+    settings: {},
     wsConnected: false,
     ws: null,
-    pendingRender: false,
-    lastRenderTime: 0
+    currentPage: 'analyze'
   };
-
-  // Throttle render to max 10fps to avoid DOM thrashing
-  const RENDER_INTERVAL = 100; // ms
 
   // =========================================
   // DOM Elements
   // =========================================
 
-  const $ = (sel, ctx = document) => ctx.querySelector(sel);
-  const $$ = (sel, ctx = document) => [...ctx.querySelectorAll(sel)];
-
-  const elements = {
-    connectionStatus: $('#connectionStatus'),
-    navItems: $$('.nav-item'),
-    pages: $$('.page'),
-    downloadForm: $('#downloadForm'),
-    activeDownloads: $('#activeDownloads'),
-    completedDownloads: $('#completedDownloads'),
-    downloadingCount: $('#downloadingCount'),
-    completedFilesCount: $('#completedFilesCount'),
-    globalProgress: $('#globalProgress'),
-    globalBytes: $('#globalBytes'),
-    globalSpeed: $('#globalSpeed'),
-    globalEta: $('#globalEta'),
-    activeCount: $('#activeCount'),
-    queuedCount: $('#queuedCount'),
-    completedCount: $('#completedCount'),
-    previewPanel: $('#previewPanel'),
-    previewContent: $('#previewContent'),
-    toastContainer: $('#toastContainer'),
-    scanlineCheck: $('#scanlineCheck'),
-    accentSelect: $('#accentSelect')
-  };
+  const $ = (sel) => document.querySelector(sel);
+  const $$ = (sel) => document.querySelectorAll(sel);
 
   // =========================================
   // Navigation
   // =========================================
 
   function initNavigation() {
-    elements.navItems.forEach(item => {
-      item.addEventListener('click', () => {
+    $$('.nav-item').forEach(item => {
+      item.addEventListener('click', (e) => {
+        e.preventDefault();
         const page = item.dataset.page;
         navigateTo(page);
       });
-    });
-
-    // Handle navigate links
-    document.addEventListener('click', (e) => {
-      const link = e.target.closest('[data-navigate]');
-      if (link) {
-        e.preventDefault();
-        navigateTo(link.dataset.navigate);
-      }
     });
   }
 
   function navigateTo(page) {
     // Update nav
-    elements.navItems.forEach(item => {
-      item.classList.toggle('active', item.dataset.page === page);
-    });
+    $$('.nav-item').forEach(n => n.classList.remove('active'));
+    $(`.nav-item[data-page="${page}"]`)?.classList.add('active');
 
-    // Update pages
-    elements.pages.forEach(p => {
-      p.classList.toggle('active', p.id === `page-${page}`);
-    });
+    // Update page
+    $$('.page').forEach(p => p.classList.remove('active'));
+    $(`#page-${page}`)?.classList.add('active');
+
+    state.currentPage = page;
+
+    // Load page data
+    if (page === 'cache') loadCache();
+    if (page === 'jobs') loadJobs();
+    if (page === 'settings') loadSettings();
   }
 
   // =========================================
-  // WebSocket Connection
+  // WebSocket
   // =========================================
 
-  function connectWebSocket() {
-    const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const wsUrl = `${protocol}//${location.host}/api/ws`;
+  function initWebSocket() {
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const wsUrl = `${protocol}//${window.location.host}/api/ws`;
 
     try {
       state.ws = new WebSocket(wsUrl);
 
       state.ws.onopen = () => {
         state.wsConnected = true;
-        updateConnectionStatus('connected');
-        console.log('[WS] Connected');
+        updateConnectionStatus(true);
       };
 
       state.ws.onclose = () => {
         state.wsConnected = false;
-        updateConnectionStatus('disconnected');
-        console.log('[WS] Disconnected, reconnecting in 3s...');
-        setTimeout(connectWebSocket, 3000);
+        updateConnectionStatus(false);
+        // Reconnect after 3 seconds
+        setTimeout(initWebSocket, 3000);
       };
 
-      state.ws.onerror = (err) => {
-        console.error('[WS] Error:', err);
-      };
-
-      state.ws.onmessage = (e) => {
+      state.ws.onmessage = (event) => {
         try {
-          // Handle potential batched messages (newline separated)
-          const messages = e.data.split('\n').filter(m => m.trim());
-          for (const msg of messages) {
-            const parsed = JSON.parse(msg);
-            handleWSMessage(parsed);
-          }
-        } catch (err) {
-          console.error('[WS] Parse error:', err, e.data);
+          const msg = JSON.parse(event.data);
+          handleWSMessage(msg);
+        } catch (e) {
+          console.error('WS parse error:', e);
         }
       };
-    } catch (err) {
-      console.error('[WS] Failed to connect:', err);
-      updateConnectionStatus('disconnected');
-      setTimeout(connectWebSocket, 3000);
+
+      state.ws.onerror = (error) => {
+        console.error('WS error:', error);
+      };
+    } catch (e) {
+      console.error('WS connection failed:', e);
+      setTimeout(initWebSocket, 3000);
     }
   }
 
-  function updateConnectionStatus(status) {
-    const el = elements.connectionStatus;
-    el.className = `connection-status ${status}`;
-    
-    const text = el.querySelector('.status-text');
-    switch (status) {
-      case 'connected':
-        text.textContent = 'Connected';
-        break;
-      case 'disconnected':
-        text.textContent = 'Disconnected';
-        break;
-      default:
-        text.textContent = 'Connecting...';
+  function updateConnectionStatus(connected) {
+    const indicator = $('.status-indicator');
+    const text = $('.status-text');
+
+    if (connected) {
+      indicator?.classList.add('connected');
+      if (text) text.textContent = 'Connected';
+    } else {
+      indicator?.classList.remove('connected');
+      if (text) text.textContent = 'Reconnecting...';
     }
   }
-
-  // =========================================
-  // WebSocket Message Handling
-  // =========================================
 
   function handleWSMessage(msg) {
-    console.log('[WS]', msg.type, msg.data);
-
-    switch (msg.type) {
-      case 'init':
-        // Initial state with all jobs
-        handleInit(msg.data);
-        break;
-
-      case 'job_update':
-        // Job status update
-        handleJobUpdate(msg.data);
-        break;
-
-      case 'event':
-        // Legacy event format
-        handleEvent(msg.data);
-        break;
-
-      default:
-        console.log('[WS] Unknown message type:', msg.type);
+    if (msg.type === 'job_update' || msg.type === 'progress') {
+      updateJobFromWS(msg);
     }
   }
 
-  function handleInit(data) {
-    console.log('[WS] Initialized with', data.jobs?.length || 0, 'jobs');
-    
-    // Clear and rebuild downloads from server state
-    state.activeDownloads.clear();
-    
-    if (data.jobs) {
-      for (const job of data.jobs) {
-        handleJobUpdate(job);
+  function updateJobFromWS(msg) {
+    if (msg.jobId) {
+      const job = state.jobs.get(msg.jobId) || { id: msg.jobId };
+      Object.assign(job, msg);
+      state.jobs.set(msg.jobId, job);
+
+      // Update badge
+      updateJobsBadge();
+
+      // Re-render if on jobs page
+      if (state.currentPage === 'jobs') {
+        renderJobs();
       }
     }
-    
-    renderDownloads();
-    updateStats();
   }
 
-  function handleJobUpdate(job) {
-    if (!job || !job.id) return;
+  function updateJobsBadge() {
+    const activeCount = Array.from(state.jobs.values())
+      .filter(j => j.status === 'downloading' || j.status === 'queued').length;
 
-    // Map server job to our download state
-    const dl = {
-      id: job.id,
-      repo: job.repo,
-      path: job.repo,
-      total: job.progress?.totalBytes || 0,
-      downloaded: job.progress?.downloadedBytes || 0,
-      speed: job.progress?.bytesPerSecond || 0,
-      status: mapJobStatus(job.status),
-      files: job.files || [],
-      totalFiles: job.progress?.totalFiles || 0,
-      completedFiles: job.progress?.completedFiles || 0,
-      error: job.error
+    const badge = $('#jobsBadge');
+    if (badge) {
+      if (activeCount > 0) {
+        badge.textContent = activeCount;
+        badge.style.display = 'block';
+      } else {
+        badge.style.display = 'none';
+      }
+    }
+  }
+
+  // =========================================
+  // API Helpers
+  // =========================================
+
+  async function api(method, path, body = null) {
+    const opts = {
+      method,
+      headers: { 'Content-Type': 'application/json' }
     };
+    if (body) opts.body = JSON.stringify(body);
 
-    state.activeDownloads.set(job.id, dl);
-    
-    // Throttled rendering to avoid DOM thrashing
-    scheduleRender();
+    const res = await fetch(`/api${path}`, opts);
+    const data = await res.json();
 
-    // Show toast on status changes (always immediate)
-    if (job.status === 'completed') {
-      showToast(`Download complete: ${job.repo}`, 'success');
-    } else if (job.status === 'failed') {
-      showToast(`Download failed: ${job.error || job.repo}`, 'error');
+    if (!res.ok) {
+      throw new Error(data.error || 'API error');
     }
-  }
-
-  function scheduleRender() {
-    if (state.pendingRender) return;
-    
-    const now = Date.now();
-    const elapsed = now - state.lastRenderTime;
-    
-    if (elapsed >= RENDER_INTERVAL) {
-      // Render immediately
-      doRender();
-    } else {
-      // Schedule render
-      state.pendingRender = true;
-      setTimeout(() => {
-        doRender();
-      }, RENDER_INTERVAL - elapsed);
-    }
-  }
-
-  function doRender() {
-    state.pendingRender = false;
-    state.lastRenderTime = Date.now();
-    renderDownloads();
-    updateStats();
-    updateGlobalProgress();
-  }
-
-  function mapJobStatus(status) {
-    switch (status) {
-      case 'queued': return 'queued';
-      case 'running': return 'active';
-      case 'completed': return 'complete';
-      case 'failed': return 'error';
-      case 'cancelled': return 'cancelled';
-      default: return 'pending';
-    }
-  }
-
-  function handleEvent(event) {
-    // Legacy event handling (kept for compatibility)
-    console.log('[Event]', event);
-
-    switch (event.event) {
-      case 'scan_start':
-        showToast(`Scanning ${event.repo}...`, 'info');
-        break;
-
-      case 'file_start':
-        addOrUpdateDownload(event);
-        break;
-
-      case 'file_progress':
-        updateDownloadProgress(event);
-        break;
-
-      case 'file_done':
-        markDownloadComplete(event);
-        break;
-
-      case 'error':
-        showToast(event.message || 'An error occurred', 'error');
-        break;
-
-      case 'done':
-        showToast(event.message || 'Download complete!', 'success');
-        updateStats();
-        break;
-    }
+    return data;
   }
 
   // =========================================
-  // Downloads UI
+  // Analyze Page
   // =========================================
 
-  function addOrUpdateDownload(event) {
-    const id = event.path || event.repo;
-    
-    if (!state.activeDownloads.has(id)) {
-      state.activeDownloads.set(id, {
-        path: event.path,
-        repo: event.repo,
-        total: event.total || 0,
-        downloaded: 0,
-        speed: 0,
-        status: 'active'
-      });
-    }
+  function initAnalyzePage() {
+    const input = $('#analyzeInput');
+    const btn = $('#analyzeBtn');
+    const datasetCheckbox = $('#analyzeDataset');
 
-    renderDownloads();
-    updateStats();
-  }
-
-  function updateDownloadProgress(event) {
-    const id = event.path || event.repo;
-    const dl = state.activeDownloads.get(id);
-    
-    if (dl) {
-      dl.downloaded = event.downloaded || 0;
-      dl.total = event.total || dl.total;
-      dl.speed = event.speed || 0;
-      renderDownloads();
-    }
-
-    updateGlobalProgress();
-  }
-
-  function markDownloadComplete(event) {
-    const id = event.path || event.repo;
-    const dl = state.activeDownloads.get(id);
-    
-    if (dl) {
-      dl.status = event.message?.includes('skip') ? 'skipped' : 'complete';
-      dl.downloaded = dl.total;
-    }
-
-    renderDownloads();
-    updateStats();
-  }
-
-  function renderDownloads() {
-    const activeContainer = elements.activeDownloads;
-    const completedContainer = elements.completedDownloads;
-    
-    // Group jobs by status
-    const activeJobs = [];   // running or queued
-    const completedJobs = []; // complete, failed, cancelled
-    
-    state.activeDownloads.forEach((dl, jobId) => {
-      const jobData = { ...dl, jobId };
-      if (dl.status === 'active' || dl.status === 'queued') {
-        activeJobs.push(jobData);
-      } else {
-        completedJobs.push(jobData);
-      }
+    // Enter key
+    input?.addEventListener('keypress', (e) => {
+      if (e.key === 'Enter') analyzeRepo();
     });
 
-    // Count active files
-    let activeFileCount = 0;
-    activeJobs.forEach(job => {
-      if (job.files && job.files.length > 0) {
-        activeFileCount += job.files.filter(f => f.status === 'active').length;
-      }
-    });
-    
-    // Update counters
-    if (elements.downloadingCount) {
-      elements.downloadingCount.textContent = `${activeJobs.length} model${activeJobs.length !== 1 ? 's' : ''}, ${activeFileCount} file${activeFileCount !== 1 ? 's' : ''}`;
-    }
-    if (elements.completedFilesCount) {
-      elements.completedFilesCount.textContent = `${completedJobs.length} model${completedJobs.length !== 1 ? 's' : ''}`;
-    }
+    // Button click
+    btn?.addEventListener('click', analyzeRepo);
 
-    // Render active jobs (grouped by model)
-    if (activeJobs.length === 0) {
-      activeContainer.innerHTML = `
-        <div class="empty-state">
-          <div class="empty-icon">⏸</div>
-          <p>No downloads in progress</p>
-        </div>
-      `;
-    } else {
-      let html = '';
-      
-      activeJobs.forEach(job => {
-        const jobProgress = job.total > 0 ? (job.downloaded / job.total * 100) : 0;
-        const fileInfo = job.totalFiles > 0 ? `${job.completedFiles}/${job.totalFiles} files` : '';
-        
-        html += `
-          <div class="job-group" data-job-id="${escapeHtml(job.jobId)}">
-            <div class="job-header">
-              <div class="job-info">
-                <span class="job-status ${job.status === 'active' ? 'active' : 'queued'}">${job.status === 'active' ? '▶' : '◎'}</span>
-                <span class="job-name">${escapeHtml(job.repo || job.path)}</span>
-                <span class="job-meta">${formatBytes(job.downloaded)}/${formatBytes(job.total)} ${fileInfo ? '• ' + fileInfo : ''}</span>
-              </div>
-              <button class="btn btn-icon btn-cancel" data-job-id="${escapeHtml(job.jobId)}" title="Cancel">×</button>
-            </div>
-            <div class="job-progress-bar">
-              <div class="job-progress-fill ${job.status === 'active' ? 'animated' : ''}" style="width: ${jobProgress.toFixed(1)}%"></div>
-            </div>
-        `;
-        
-        // Show active files for this job (max 5)
-        if (job.files && job.files.length > 0) {
-          const activeFiles = job.files.filter(f => f.status === 'active').slice(0, 5);
-          if (activeFiles.length > 0) {
-            html += '<div class="job-files">';
-            activeFiles.forEach(file => {
-              const fileProgress = file.totalBytes > 0 ? (file.downloaded / file.totalBytes * 100) : 0;
-              const fileName = file.path.split('/').pop();
-              
-              html += `
-                <div class="file-item downloading">
-                  <span class="file-status">▶</span>
-                  <span class="file-name" title="${escapeHtml(file.path)}">${escapeHtml(fileName)}</span>
-                  <div class="file-progress-bar">
-                    <div class="file-progress-fill animated" style="width: ${fileProgress.toFixed(1)}%"></div>
-                  </div>
-                  <span class="file-size">${formatBytes(file.downloaded)}/${formatBytes(file.totalBytes)}</span>
-                </div>
-              `;
-            });
-            
-            const remainingActive = job.files.filter(f => f.status === 'active').length - 5;
-            if (remainingActive > 0) {
-              html += `<div class="file-item more-files">... and ${remainingActive} more downloading</div>`;
-            }
-            html += '</div>';
-          }
-        }
-        
-        html += '</div>'; // close job-group
-      });
-      
-      activeContainer.innerHTML = html;
-      
-      // Attach cancel handlers
-      activeContainer.querySelectorAll('.btn-cancel').forEach(btn => {
-        btn.addEventListener('click', () => cancelJob(btn.dataset.jobId));
-      });
-    }
-
-    // Render completed jobs (grouped by model, scrollable)
-    if (completedJobs.length === 0) {
-      completedContainer.innerHTML = `
-        <div class="empty-state">
-          <div class="empty-icon">📭</div>
-          <p>No completed downloads</p>
-          <div class="empty-actions">
-            <a href="#" class="btn btn-primary" data-navigate="models">Download Model</a>
-            <a href="#" class="btn btn-ghost" data-navigate="datasets">Download Dataset</a>
-          </div>
-        </div>
-      `;
-    } else {
-      // Preserve scroll position
-      const scrollTop = completedContainer.scrollTop;
-      
-      let html = '';
-      // Show most recent first
-      [...completedJobs].reverse().forEach(job => {
-        const statusIcon = job.status === 'complete' ? '✓' : (job.status === 'error' ? '✕' : '⊘');
-        const statusClass = job.status === 'complete' ? 'success' : (job.status === 'error' ? 'error' : 'cancelled');
-        
-        html += `
-          <div class="job-group completed" data-job-id="${escapeHtml(job.jobId)}">
-            <div class="job-header">
-              <div class="job-info">
-                <span class="job-status ${statusClass}">${statusIcon}</span>
-                <span class="job-name">${escapeHtml(job.repo || job.path)}</span>
-                <span class="job-meta">${formatBytes(job.total)} • ${job.totalFiles || 0} files</span>
-              </div>
-              <button class="btn btn-icon btn-remove" data-job-id="${escapeHtml(job.jobId)}" title="Remove">🗑</button>
-            </div>
-        `;
-        
-        // Show completed files (collapsed by default, show first 3)
-        if (job.files && job.files.length > 0) {
-          const completedFiles = job.files.filter(f => f.status === 'complete').slice(0, 3);
-          if (completedFiles.length > 0) {
-            html += '<div class="job-files">';
-            completedFiles.forEach(file => {
-              const fileName = file.path.split('/').pop();
-              html += `
-                <div class="file-item done">
-                  <span class="file-status">✓</span>
-                  <span class="file-name" title="${escapeHtml(file.path)}">${escapeHtml(fileName)}</span>
-                  <span class="file-size">${formatBytes(file.totalBytes)}</span>
-                </div>
-              `;
-            });
-            
-            const remainingFiles = job.files.filter(f => f.status === 'complete').length - 3;
-            if (remainingFiles > 0) {
-              html += `<div class="file-item more-files">... and ${remainingFiles} more files</div>`;
-            }
-            html += '</div>';
-          }
-        }
-        
-        html += '</div>'; // close job-group
-      });
-      
-      completedContainer.innerHTML = html;
-      
-      // Restore scroll position
-      completedContainer.scrollTop = scrollTop;
-      
-      // Attach remove handlers
-      completedContainer.querySelectorAll('.btn-remove').forEach(btn => {
-        btn.addEventListener('click', () => removeJob(btn.dataset.jobId));
-      });
-    }
-  }
-
-  function removeJob(jobId) {
-    // Remove from local state (completed jobs are just cleared from display)
-    state.activeDownloads.delete(jobId);
-    renderDownloads();
-    updateStats();
-    updateGlobalProgress();
-  }
-
-  async function cancelJob(jobId) {
-    try {
-      const res = await fetch(`/api/jobs/${jobId}`, { method: 'DELETE' });
-      if (res.ok) {
-        showToast('Download cancelled', 'warning');
-      }
-    } catch (err) {
-      console.error('Failed to cancel job:', err);
-    }
-  }
-
-  function updateGlobalProgress() {
-    let totalBytes = 0;
-    let downloadedBytes = 0;
-    let totalSpeed = 0;
-
-    state.activeDownloads.forEach(dl => {
-      totalBytes += dl.total;
-      downloadedBytes += dl.downloaded;
-      if (dl.status === 'active') {
-        totalSpeed += dl.speed;
-      }
-    });
-
-    const progress = totalBytes > 0 ? (downloadedBytes / totalBytes * 100) : 0;
-    
-    elements.globalProgress.style.setProperty('--progress', `${progress}%`);
-    elements.globalBytes.textContent = `${formatBytes(downloadedBytes)} / ${formatBytes(totalBytes)}`;
-    elements.globalSpeed.textContent = totalSpeed > 0 ? `${formatBytes(totalSpeed)}/s` : '—';
-    
-    if (totalSpeed > 0 && totalBytes > downloadedBytes) {
-      const remaining = (totalBytes - downloadedBytes) / totalSpeed;
-      elements.globalEta.textContent = formatDuration(remaining);
-    } else {
-      elements.globalEta.textContent = '—';
-    }
-  }
-
-  function updateStats() {
-    let active = 0, complete = 0;
-    
-    state.activeDownloads.forEach(dl => {
-      if (dl.status === 'active') active++;
-      else complete++;
-    });
-
-    elements.activeCount.textContent = active;
-    elements.completedCount.textContent = complete;
-  }
-
-  // =========================================
-  // Download Forms (Models & Datasets)
-  // =========================================
-
-  function initDownloadForms() {
-    // Model form
-    const modelForm = $('#modelForm');
-    if (modelForm) {
-      modelForm.addEventListener('submit', async (e) => {
-        e.preventDefault();
-        await startDownload(modelForm, false);
-      });
-    }
-
-    // Dataset form
-    const datasetForm = $('#datasetForm');
-    if (datasetForm) {
-      datasetForm.addEventListener('submit', async (e) => {
-        e.preventDefault();
-        await startDownload(datasetForm, true);
-      });
-    }
-
-    // Preview buttons
-    $$('.btn-preview').forEach(btn => {
-      btn.addEventListener('click', async () => {
-        const formId = btn.dataset.form;
-        const form = $(`#${formId}`);
-        if (form) {
-          const isDataset = form.dataset.type === 'dataset';
-          await previewDownload(form, isDataset);
-        }
-      });
-    });
-
-    // Close preview buttons
-    $$('.btn-close-preview').forEach(btn => {
+    // Example buttons
+    $$('.example-btn').forEach(btn => {
       btn.addEventListener('click', () => {
-        btn.closest('.preview-panel').style.display = 'none';
+        if (input) input.value = btn.dataset.repo;
+        analyzeRepo();
       });
     });
   }
 
-  async function startDownload(form, isDataset) {
-    const formData = new FormData(form);
-    const payload = formDataToObject(formData);
-    payload.dataset = isDataset;
-    
-    try {
-      const res = await fetch('/api/download', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      });
+  async function analyzeRepo() {
+    const input = $('#analyzeInput');
+    const resultDiv = $('#analyzeResult');
+    const isDataset = $('#analyzeDataset')?.checked || false;
 
-      const data = await res.json();
-
-      if (!res.ok) {
-        throw new Error(data.error || 'Failed to start download');
-      }
-
-      // Check if it was an existing job
-      if (data.message === 'Download already in progress') {
-        showToast('Download already in progress', 'warning');
-      } else {
-        showToast('Download started!', 'success');
-      }
-      
-      navigateTo('dashboard');
-    } catch (err) {
-      showToast(err.message, 'error');
+    const repo = input?.value.trim();
+    if (!repo) {
+      showToast('Please enter a repository', 'error');
+      return;
     }
-  }
 
-  async function previewDownload(form, isDataset) {
-    const formData = new FormData(form);
-    const payload = formDataToObject(formData);
-    payload.dataset = isDataset;
-    payload.dryRun = true;
-
-    try {
-      const res = await fetch('/api/plan', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      });
-
-      if (!res.ok) {
-        const err = await res.json();
-        throw new Error(err.error || 'Failed to preview');
-      }
-
-      const plan = await res.json();
-      renderPreview(form, plan);
-    } catch (err) {
-      showToast(err.message, 'error');
-    }
-  }
-
-  function renderPreview(form, plan) {
-    const files = plan.files || [];
-    const previewPanel = form.closest('.download-form-container').querySelector('.preview-panel');
-    const previewContent = previewPanel.querySelector('.preview-content');
-    
-    let html = `
-      <table class="preview-table">
-        <thead>
-          <tr>
-            <th>File</th>
-            <th>Size</th>
-            <th>Type</th>
-          </tr>
-        </thead>
-        <tbody>
-    `;
-
-    files.forEach(f => {
-      html += `
-        <tr>
-          <td>${escapeHtml(f.path)}</td>
-          <td>${formatBytes(f.size)}</td>
-          <td>${f.lfs ? 'LFS' : 'Regular'}</td>
-        </tr>
-      `;
-    });
-
-    html += `
-        </tbody>
-      </table>
-      <div style="margin-top: 1rem; color: var(--text-secondary);">
-        Total: ${files.length} files, ${formatBytes(files.reduce((a, f) => a + f.size, 0))}
+    // Show loading
+    resultDiv.innerHTML = `
+      <div class="loading-state">
+        <div class="spinner"></div>
+        <p>Analyzing ${repo}...</p>
       </div>
     `;
 
-    previewContent.innerHTML = html;
-    previewPanel.style.display = 'block';
-  }
-
-  // =========================================
-  // Settings
-  // =========================================
-
-  async function initSettings() {
-    // Load settings from server first (authoritative), then merge localStorage for UI prefs
     try {
-      const resp = await fetch('/api/settings');
-      if (resp.ok) {
-        const serverSettings = await resp.json();
-        // Map server field names to our state
-        state.settings.token = serverSettings.token || '';
-        state.settings.connections = serverSettings.connections || 8;
-        state.settings.maxActive = serverSettings.maxActive || 3;
-        state.settings.multipartThreshold = serverSettings.multipartThreshold || '32MiB';
-        state.settings.verify = serverSettings.verify || 'size';
-        state.settings.retries = serverSettings.retries || 4;
-        applySettings();
-      }
+      const queryParam = isDataset ? '?dataset=true' : '';
+      const data = await api('GET', `/analyze/${repo}${queryParam}`);
+      renderAnalysisResult(data);
     } catch (e) {
-      // Fallback to localStorage if server unavailable
-      const saved = localStorage.getItem('hfdownloader_settings');
-      if (saved) {
-        try {
-          Object.assign(state.settings, JSON.parse(saved));
-          applySettings();
-        } catch (e) {}
-      }
-    }
-
-    // Scanline toggle
-    if (elements.scanlineCheck) {
-      elements.scanlineCheck.checked = !$('.scanlines').classList.contains('hidden');
-      elements.scanlineCheck.addEventListener('change', (e) => {
-        $('.scanlines').classList.toggle('hidden', !e.target.checked);
-        localStorage.setItem('hfdownloader_scanlines', e.target.checked);
-      });
-
-      // Load preference
-      const scanPref = localStorage.getItem('hfdownloader_scanlines');
-      if (scanPref !== null) {
-        const enabled = scanPref === 'true';
-        elements.scanlineCheck.checked = enabled;
-        $('.scanlines').classList.toggle('hidden', !enabled);
-      }
-    }
-
-    // Accent color
-    if (elements.accentSelect) {
-      elements.accentSelect.addEventListener('change', (e) => {
-        document.body.dataset.accent = e.target.value;
-        localStorage.setItem('hfdownloader_accent', e.target.value);
-      });
-
-      // Load preference
-      const accentPref = localStorage.getItem('hfdownloader_accent');
-      if (accentPref) {
-        elements.accentSelect.value = accentPref;
-        document.body.dataset.accent = accentPref;
-      }
-    }
-
-    // Save button
-    const saveBtn = $('#saveSettingsBtn');
-    if (saveBtn) {
-      saveBtn.addEventListener('click', saveSettings);
+      resultDiv.innerHTML = `
+        <div class="empty-state">
+          <div class="empty-icon" style="color: var(--color-error);">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="64" height="64">
+              <circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/>
+            </svg>
+          </div>
+          <h3>Analysis Failed</h3>
+          <p>${escapeHtml(e.message)}</p>
+        </div>
+      `;
     }
   }
 
-  function applySettings() {
-    // Apply to form fields
-    const tokenInput = $('#tokenInput');
-    if (tokenInput) tokenInput.value = state.settings.token || '';
+  function renderAnalysisResult(data) {
+    const resultDiv = $('#analyzeResult');
+    if (!resultDiv) return;
 
-    const connectionsInput = $('#connectionsInput');
-    if (connectionsInput) connectionsInput.value = state.settings.connections;
+    const filesHtml = data.files?.slice(0, 20).map(f => `
+      <div class="analysis-file">
+        <span class="analysis-file-name">${escapeHtml(f.path || f.name)}</span>
+        <span class="analysis-file-size">${f.size_human || formatBytes(f.size)}</span>
+      </div>
+    `).join('') || '';
 
-    const maxActiveInput = $('#maxActiveInput');
-    if (maxActiveInput) maxActiveInput.value = state.settings.maxActive;
+    const moreFiles = (data.files?.length || 0) > 20
+      ? `<div class="analysis-file" style="justify-content: center; color: var(--color-text-muted);">
+           ... and ${data.files.length - 20} more files
+         </div>`
+      : '';
 
-    const thresholdInput = $('#thresholdInput');
-    if (thresholdInput) thresholdInput.value = state.settings.multipartThreshold;
+    // Build type-specific info
+    let typeInfoHtml = '';
 
-    const retriesInput = $('#retriesInput');
-    if (retriesInput) retriesInput.value = state.settings.retries;
+    if (data.transformers) {
+      const t = data.transformers;
+      typeInfoHtml = `
+        <div class="analysis-section">
+          <h4>Model Configuration</h4>
+          <div class="analysis-grid">
+            ${t.architecture ? `<div class="analysis-stat"><div class="analysis-stat-label">Architecture</div><div class="analysis-stat-value">${escapeHtml(t.architecture)}</div></div>` : ''}
+            ${t.estimated_parameters ? `<div class="analysis-stat"><div class="analysis-stat-label">Parameters</div><div class="analysis-stat-value">~${escapeHtml(t.estimated_parameters)}</div></div>` : ''}
+            ${t.hidden_size ? `<div class="analysis-stat"><div class="analysis-stat-label">Hidden Size</div><div class="analysis-stat-value">${t.hidden_size}</div></div>` : ''}
+            ${t.num_hidden_layers ? `<div class="analysis-stat"><div class="analysis-stat-label">Layers</div><div class="analysis-stat-value">${t.num_hidden_layers}</div></div>` : ''}
+            ${t.context_length ? `<div class="analysis-stat"><div class="analysis-stat-label">Context Length</div><div class="analysis-stat-value">${t.context_length.toLocaleString()} tokens</div></div>` : ''}
+            ${t.precision ? `<div class="analysis-stat"><div class="analysis-stat-label">Precision</div><div class="analysis-stat-value">${escapeHtml(t.precision)}</div></div>` : ''}
+          </div>
+        </div>
+      `;
+    }
 
-    const verifySelect = $('#verifySelect');
-    if (verifySelect) verifySelect.value = state.settings.verify;
+    if (data.gguf) {
+      const g = data.gguf;
+      const quantsHtml = g.quantizations?.slice(0, 10).map(q => `
+        <div class="analysis-file">
+          <span class="analysis-file-name">${escapeHtml(q.name)}</span>
+          <span class="analysis-file-size">${q.file?.size_human || ''} / ~${q.estimated_ram_human || ''} RAM</span>
+        </div>
+      `).join('') || '';
+
+      typeInfoHtml = `
+        <div class="analysis-section">
+          <h4>GGUF Information</h4>
+          <div class="analysis-grid">
+            ${g.model_name ? `<div class="analysis-stat"><div class="analysis-stat-label">Model</div><div class="analysis-stat-value">${escapeHtml(g.model_name)}</div></div>` : ''}
+            ${g.parameter_count ? `<div class="analysis-stat"><div class="analysis-stat-label">Parameters</div><div class="analysis-stat-value">${escapeHtml(g.parameter_count)}</div></div>` : ''}
+          </div>
+        </div>
+        ${quantsHtml ? `<div class="analysis-section"><h4>Available Quantizations</h4><div class="analysis-files">${quantsHtml}</div></div>` : ''}
+      `;
+    }
+
+    if (data.diffusers) {
+      const d = data.diffusers;
+      typeInfoHtml = `
+        <div class="analysis-section">
+          <h4>Diffusers Pipeline</h4>
+          <div class="analysis-grid">
+            ${d.pipeline_type ? `<div class="analysis-stat"><div class="analysis-stat-label">Pipeline</div><div class="analysis-stat-value">${escapeHtml(d.pipeline_type)}</div></div>` : ''}
+            ${d.diffusers_version ? `<div class="analysis-stat"><div class="analysis-stat-label">Version</div><div class="analysis-stat-value">${escapeHtml(d.diffusers_version)}</div></div>` : ''}
+            ${d.variants?.length ? `<div class="analysis-stat"><div class="analysis-stat-label">Variants</div><div class="analysis-stat-value">${d.variants.join(', ')}</div></div>` : ''}
+          </div>
+        </div>
+      `;
+    }
+
+    if (data.dataset) {
+      const ds = data.dataset;
+      const splitsHtml = ds.splits?.map(s => `
+        <div class="analysis-file">
+          <span class="analysis-file-name">${escapeHtml(s.name)}</span>
+          <span class="analysis-file-size">${s.file_count} files / ${s.size_human}</span>
+        </div>
+      `).join('') || '';
+
+      typeInfoHtml = `
+        <div class="analysis-section">
+          <h4>Dataset Information</h4>
+          <div class="analysis-grid">
+            ${ds.primary_format ? `<div class="analysis-stat"><div class="analysis-stat-label">Format</div><div class="analysis-stat-value">${escapeHtml(ds.primary_format)}</div></div>` : ''}
+            ${ds.configs?.length ? `<div class="analysis-stat"><div class="analysis-stat-label">Configs</div><div class="analysis-stat-value">${ds.configs.join(', ')}</div></div>` : ''}
+          </div>
+        </div>
+        ${splitsHtml ? `<div class="analysis-section"><h4>Splits</h4><div class="analysis-files">${splitsHtml}</div></div>` : ''}
+      `;
+    }
+
+    resultDiv.innerHTML = `
+      <div class="analysis-card">
+        <div class="analysis-header">
+          <div class="analysis-repo">${escapeHtml(data.repo)}</div>
+          <span class="analysis-type">${escapeHtml(data.type_description || data.type)}</span>
+          <div class="analysis-meta">
+            <span>${data.file_count} files</span>
+            <span>${data.total_size_human}</span>
+          </div>
+        </div>
+        <div class="analysis-body">
+          ${typeInfoHtml}
+          <div class="analysis-section">
+            <h4>Files</h4>
+            <div class="analysis-files">
+              ${filesHtml}
+              ${moreFiles}
+            </div>
+          </div>
+        </div>
+        <div class="analysis-actions">
+          <button class="btn btn-primary" onclick="downloadFromAnalysis('${escapeHtml(data.repo)}', ${data.is_dataset})">
+            Download
+          </button>
+        </div>
+      </div>
+    `;
+  }
+
+  // Make downloadFromAnalysis available globally
+  window.downloadFromAnalysis = function(repo, isDataset) {
+    if (isDataset) {
+      $('#datasetRepo').value = repo;
+      navigateTo('download');
+    } else {
+      $('#modelRepo').value = repo;
+      navigateTo('download');
+    }
+  };
+
+  // =========================================
+  // Download Page
+  // =========================================
+
+  function initDownloadPage() {
+    // Model form
+    $('#modelForm')?.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      await startDownload('model');
+    });
+
+    // Dataset form
+    $('#datasetForm')?.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      await startDownload('dataset');
+    });
+
+    // Preview buttons
+    $('#previewModelBtn')?.addEventListener('click', () => previewDownload('model'));
+    $('#previewDatasetBtn')?.addEventListener('click', () => previewDownload('dataset'));
+  }
+
+  async function startDownload(type) {
+    const isDataset = type === 'dataset';
+    const prefix = isDataset ? 'dataset' : 'model';
+
+    const repo = $(`#${prefix}Repo`)?.value.trim();
+    const revision = $(`#${prefix}Revision`)?.value.trim() || 'main';
+    const filter = $(`#${prefix}Filter`)?.value.trim();
+    const exclude = $(`#${prefix}Exclude`)?.value.trim();
+
+    if (!repo) {
+      showToast('Please enter a repository', 'error');
+      return;
+    }
+
+    const body = {
+      repo,
+      revision,
+      dataset: isDataset,
+      filters: filter ? filter.split(',').map(s => s.trim()).filter(Boolean) : [],
+      excludes: exclude ? exclude.split(',').map(s => s.trim()).filter(Boolean) : []
+    };
+
+    try {
+      const data = await api('POST', '/download', body);
+      showToast(`Download started: ${repo}`, 'success');
+      navigateTo('jobs');
+    } catch (e) {
+      showToast(`Failed: ${e.message}`, 'error');
+    }
+  }
+
+  async function previewDownload(type) {
+    const isDataset = type === 'dataset';
+    const prefix = isDataset ? 'dataset' : 'model';
+
+    const repo = $(`#${prefix}Repo`)?.value.trim();
+    if (!repo) {
+      showToast('Please enter a repository', 'error');
+      return;
+    }
+
+    const body = {
+      repo,
+      revision: $(`#${prefix}Revision`)?.value.trim() || 'main',
+      dataset: isDataset,
+      filters: ($(`#${prefix}Filter`)?.value || '').split(',').map(s => s.trim()).filter(Boolean),
+      excludes: ($(`#${prefix}Exclude`)?.value || '').split(',').map(s => s.trim()).filter(Boolean),
+      dryRun: true
+    };
+
+    try {
+      showModal('Preview', '<div class="loading-state"><div class="spinner"></div><p>Scanning repository...</p></div>');
+
+      const data = await api('POST', '/plan', body);
+
+      const filesHtml = data.files?.map(f => `
+        <div class="analysis-file">
+          <span class="analysis-file-name">${escapeHtml(f.path)}</span>
+          <span class="analysis-file-size">${formatBytes(f.size)}</span>
+        </div>
+      `).join('') || '<p>No files found</p>';
+
+      setModalContent(`
+        <p style="margin-bottom: 16px; color: var(--color-text-secondary);">
+          ${data.totalFiles} files, ${formatBytes(data.totalSize)} total
+        </p>
+        <div class="analysis-files" style="max-height: 400px;">
+          ${filesHtml}
+        </div>
+      `);
+    } catch (e) {
+      setModalContent(`<p style="color: var(--color-error);">${escapeHtml(e.message)}</p>`);
+    }
+  }
+
+  // =========================================
+  // Jobs Page
+  // =========================================
+
+  async function loadJobs() {
+    try {
+      const data = await api('GET', '/jobs');
+      state.jobs.clear();
+      (data.jobs || []).forEach(job => {
+        state.jobs.set(job.id, job);
+      });
+      renderJobs();
+      updateJobsBadge();
+    } catch (e) {
+      console.error('Failed to load jobs:', e);
+    }
+  }
+
+  function renderJobs() {
+    const container = $('#jobsList');
+    if (!container) return;
+
+    const jobs = Array.from(state.jobs.values());
+
+    if (jobs.length === 0) {
+      container.innerHTML = `
+        <div class="empty-state">
+          <div class="empty-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="64" height="64">
+              <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>
+            </svg>
+          </div>
+          <h3>No Active Downloads</h3>
+          <p>Start a download from the Download page to see progress here.</p>
+        </div>
+      `;
+      return;
+    }
+
+    container.innerHTML = jobs.map(job => {
+      const progress = job.progress || 0;
+      const status = job.status || 'queued';
+
+      return `
+        <div class="job-card">
+          <div class="job-header">
+            <div>
+              <div class="job-repo">${escapeHtml(job.repo)}</div>
+              <div style="font-size: 13px; color: var(--color-text-muted);">${escapeHtml(job.revision || 'main')}</div>
+            </div>
+            <span class="job-status ${status}">${status}</span>
+          </div>
+          <div class="job-progress">
+            <div class="progress-bar">
+              <div class="progress-fill" style="width: ${progress}%"></div>
+            </div>
+          </div>
+          <div class="job-stats">
+            <span>${progress.toFixed(1)}%</span>
+            ${job.speed ? `<span>${formatBytes(job.speed)}/s</span>` : ''}
+            ${job.downloaded && job.total ? `<span>${formatBytes(job.downloaded)} / ${formatBytes(job.total)}</span>` : ''}
+          </div>
+        </div>
+      `;
+    }).join('');
+  }
+
+  // =========================================
+  // Cache Page
+  // =========================================
+
+  async function loadCache() {
+    const container = $('#cacheList');
+    if (!container) return;
+
+    container.innerHTML = `
+      <div class="loading-state">
+        <div class="spinner"></div>
+        <p>Loading cache...</p>
+      </div>
+    `;
+
+    try {
+      const data = await api('GET', '/cache');
+
+      if (!data.repos || data.repos.length === 0) {
+        container.innerHTML = `
+          <div class="empty-state">
+            <div class="empty-icon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="64" height="64">
+                <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
+              </svg>
+            </div>
+            <h3>Cache is Empty</h3>
+            <p>Downloaded models and datasets will appear here.</p>
+            <p style="font-size: 12px; color: var(--color-text-muted); margin-top: 8px;">
+              Cache directory: ${escapeHtml(data.cacheDir)}
+            </p>
+          </div>
+        `;
+        return;
+      }
+
+      container.innerHTML = `
+        <div class="cache-grid">
+          ${data.repos.map(repo => `
+            <div class="cache-item" onclick="showCacheInfo('${escapeHtml(repo.repo)}')">
+              <div class="cache-item-type">${escapeHtml(repo.type)}</div>
+              <div class="cache-item-repo">${escapeHtml(repo.repo)}</div>
+              <div class="cache-item-path" title="${escapeHtml(repo.path)}">${escapeHtml(repo.path)}</div>
+            </div>
+          `).join('')}
+        </div>
+      `;
+    } catch (e) {
+      container.innerHTML = `
+        <div class="empty-state">
+          <h3>Failed to Load Cache</h3>
+          <p>${escapeHtml(e.message)}</p>
+        </div>
+      `;
+    }
+  }
+
+  window.showCacheInfo = async function(repo) {
+    try {
+      showModal('Repository Info', '<div class="loading-state"><div class="spinner"></div></div>');
+      const data = await api('GET', `/cache/${repo}`);
+
+      const snapshotsHtml = data.snapshots?.length
+        ? `<div style="margin-top: 16px;">
+             <strong>Snapshots:</strong>
+             <div style="margin-top: 8px;">${data.snapshots.map(s => `<code style="display: block; font-size: 12px; color: var(--color-text-muted); margin-bottom: 4px;">${escapeHtml(s)}</code>`).join('')}</div>
+           </div>`
+        : '';
+
+      setModalContent(`
+        <div class="form-group">
+          <label>Repository</label>
+          <div style="font-weight: 600;">${escapeHtml(data.repo)}</div>
+        </div>
+        <div class="form-group">
+          <label>Type</label>
+          <div>${escapeHtml(data.type)}</div>
+        </div>
+        <div class="form-group">
+          <label>Path</label>
+          <div style="font-family: var(--font-mono); font-size: 13px; word-break: break-all;">${escapeHtml(data.path)}</div>
+        </div>
+        ${snapshotsHtml}
+      `);
+    } catch (e) {
+      setModalContent(`<p style="color: var(--color-error);">${escapeHtml(e.message)}</p>`);
+    }
+  };
+
+  $('#refreshCacheBtn')?.addEventListener('click', loadCache);
+
+  // =========================================
+  // Settings Page
+  // =========================================
+
+  async function loadSettings() {
+    try {
+      const data = await api('GET', '/settings');
+      state.settings = data;
+
+      $('#hfToken').value = data.token || '';
+      $('#connections').value = data.connections || 8;
+      $('#maxActive').value = data.maxActive || 3;
+      $('#retries').value = data.retries || 4;
+      $('#verify').value = data.verify || 'size';
+      $('#endpoint').value = data.endpoint || '';
+    } catch (e) {
+      console.error('Failed to load settings:', e);
+    }
+  }
+
+  function initSettingsPage() {
+    $('#saveSettingsBtn')?.addEventListener('click', saveSettings);
+
+    // Toggle password visibility
+    $$('.toggle-visibility').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const target = btn.dataset.target;
+        const input = $(`#${target}`);
+        if (input) {
+          const isPassword = input.type === 'password';
+          input.type = isPassword ? 'text' : 'password';
+          btn.querySelector('.icon-show').style.display = isPassword ? 'none' : 'block';
+          btn.querySelector('.icon-hide').style.display = isPassword ? 'block' : 'none';
+        }
+      });
+    });
   }
 
   async function saveSettings() {
-    const newSettings = {
-      token: $('#tokenInput')?.value || '',
-      connections: parseInt($('#connectionsInput')?.value) || 8,
-      maxActive: parseInt($('#maxActiveInput')?.value) || 3,
-      multipartThreshold: $('#thresholdInput')?.value || '32MiB',
-      retries: parseInt($('#retriesInput')?.value) || 4,
-      verify: $('#verifySelect')?.value || 'size'
+    const body = {
+      token: $('#hfToken')?.value || '',
+      connections: parseInt($('#connections')?.value) || 8,
+      maxActive: parseInt($('#maxActive')?.value) || 3,
+      retries: parseInt($('#retries')?.value) || 4,
+      verify: $('#verify')?.value || 'size'
     };
 
-    Object.assign(state.settings, newSettings);
-    localStorage.setItem('hfdownloader_settings', JSON.stringify(state.settings));
-
-    // Send to server
     try {
-      await fetch('/api/settings', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(newSettings)
-      });
-      showToast('Settings saved!', 'success');
-    } catch (err) {
-      showToast('Failed to save settings to server', 'warning');
+      await api('POST', '/settings', body);
+      showToast('Settings saved', 'success');
+    } catch (e) {
+      showToast(`Failed: ${e.message}`, 'error');
     }
   }
 
   // =========================================
-  // Toasts
+  // Modal
+  // =========================================
+
+  function showModal(title, content) {
+    $('#modalTitle').textContent = title;
+    $('#modalBody').innerHTML = content;
+    $('#modalBackdrop').classList.add('active');
+  }
+
+  function setModalContent(content) {
+    $('#modalBody').innerHTML = content;
+  }
+
+  function hideModal() {
+    $('#modalBackdrop').classList.remove('active');
+  }
+
+  function initModal() {
+    $('#modalClose')?.addEventListener('click', hideModal);
+    $('#modalBackdrop')?.addEventListener('click', (e) => {
+      if (e.target === $('#modalBackdrop')) hideModal();
+    });
+  }
+
+  // =========================================
+  // Toast
   // =========================================
 
   function showToast(message, type = 'info') {
+    const container = $('#toastContainer');
+    if (!container) return;
+
     const toast = document.createElement('div');
     toast.className = `toast ${type}`;
-    
-    const icons = {
-      success: '✓',
-      error: '✕',
-      warning: '⚠',
-      info: 'ℹ'
-    };
+    toast.innerHTML = `<span class="toast-message">${escapeHtml(message)}</span>`;
 
-    toast.innerHTML = `
-      <span class="toast-icon">${icons[type] || icons.info}</span>
-      <span class="toast-message">${escapeHtml(message)}</span>
-    `;
-
-    elements.toastContainer.appendChild(toast);
+    container.appendChild(toast);
 
     setTimeout(() => {
-      toast.style.animation = 'slideIn 0.3s ease reverse forwards';
+      toast.style.animation = 'slideIn 0.3s ease reverse';
       setTimeout(() => toast.remove(), 300);
     }, 4000);
   }
@@ -870,85 +722,38 @@
   // Utilities
   // =========================================
 
+  function escapeHtml(str) {
+    if (!str) return '';
+    const div = document.createElement('div');
+    div.textContent = str;
+    return div.innerHTML;
+  }
+
   function formatBytes(bytes) {
-    if (bytes === 0) return '0 B';
+    if (!bytes || bytes === 0) return '0 B';
     const k = 1024;
     const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
     const i = Math.floor(Math.log(bytes) / Math.log(k));
     return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
   }
 
-  function formatDuration(seconds) {
-    if (!seconds || seconds < 0) return '—';
-    if (seconds < 60) return `${Math.round(seconds)}s`;
-    if (seconds < 3600) {
-      const m = Math.floor(seconds / 60);
-      const s = Math.round(seconds % 60);
-      return `${m}m ${s}s`;
-    }
-    const h = Math.floor(seconds / 3600);
-    const m = Math.round((seconds % 3600) / 60);
-    return `${h}h ${m}m`;
-  }
-
-  function escapeHtml(str) {
-    if (!str) return '';
-    return str
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
-      .replace(/"/g, '&quot;');
-  }
-
-  function formDataToObject(formData) {
-    const obj = {};
-    formData.forEach((value, key) => {
-      if (key === 'dataset' || key === 'appendFilterSubdir') {
-        obj[key] = true;
-      } else if (key === 'filters' || key === 'excludes') {
-        // Convert comma-separated string to array
-        if (value && value.trim()) {
-          obj[key] = value.split(',').map(s => s.trim()).filter(s => s);
-        }
-      } else if (value) {
-        obj[key] = value;
-      }
-    });
-    return obj;
-  }
-
   // =========================================
-  // Password Toggle
+  // Initialize
   // =========================================
 
-  function initPasswordToggles() {
-    $$('.toggle-password').forEach(btn => {
-      btn.addEventListener('click', () => {
-        const input = btn.previousElementSibling;
-        const isPassword = input.type === 'password';
-        input.type = isPassword ? 'text' : 'password';
-      });
-    });
-  }
-
-  // =========================================
-  // Init
-  // =========================================
-
-  async function init() {
+  function init() {
     initNavigation();
-    initDownloadForms();
-    await initSettings();
-    initPasswordToggles();
+    initWebSocket();
+    initAnalyzePage();
+    initDownloadPage();
+    initSettingsPage();
+    initModal();
 
-    // Connect WebSocket
-    // Wait a bit for the page to settle
-    setTimeout(connectWebSocket, 500);
-
-    console.log('🤗 HF Downloader UI initialized');
+    // Load initial data
+    loadJobs();
   }
 
-  // Start when DOM is ready
+  // Start
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', init);
   } else {
@@ -956,4 +761,3 @@
   }
 
 })();
-

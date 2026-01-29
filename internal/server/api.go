@@ -7,10 +7,12 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
 	"github.com/bodaay/HuggingFaceModelDownloader/pkg/hfdownloader"
+	"github.com/bodaay/HuggingFaceModelDownloader/pkg/smartdl"
 )
 
 // DownloadRequest is the request body for starting a download.
@@ -361,4 +363,138 @@ func writeError(w http.ResponseWriter, status int, message, details string) {
 		Error:   message,
 		Details: details,
 	})
+}
+
+// --- Smart Analyzer ---
+
+// handleAnalyze analyzes a HuggingFace repository.
+func (s *Server) handleAnalyze(w http.ResponseWriter, r *http.Request) {
+	// Get repo from path (supports owner/name format)
+	repo := r.PathValue("repo")
+	if repo == "" {
+		writeError(w, http.StatusBadRequest, "Missing repository", "Format: /api/analyze/owner/name")
+		return
+	}
+
+	// Check if it's a dataset
+	isDataset := r.URL.Query().Get("dataset") == "true"
+
+	// Create analyzer
+	opts := smartdl.AnalyzerOptions{
+		Token:    s.config.Token,
+		Endpoint: s.config.Endpoint,
+	}
+	analyzer := smartdl.NewAnalyzer(opts)
+
+	// Analyze with timeout
+	ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
+	defer cancel()
+
+	info, err := analyzer.Analyze(ctx, repo, isDataset)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "Analysis failed", err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusOK, info)
+}
+
+// --- Cache Browser ---
+
+// CachedRepoInfo represents a cached repository for the API response.
+type CachedRepoInfo struct {
+	Repo      string   `json:"repo"`
+	Type      string   `json:"type"` // "model" or "dataset"
+	Path      string   `json:"path"`
+	Snapshots []string `json:"snapshots,omitempty"`
+}
+
+// handleCacheList lists all cached repositories.
+func (s *Server) handleCacheList(w http.ResponseWriter, r *http.Request) {
+	cacheDir := s.config.CacheDir
+	if cacheDir == "" {
+		cacheDir = hfdownloader.DefaultCacheDir()
+	}
+
+	// Get query params
+	repoType := r.URL.Query().Get("type") // "model" or "dataset"
+
+	cache := hfdownloader.NewHFCache(cacheDir, 0)
+	repoDirs, err := cache.ListRepos()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "Failed to list cache", err.Error())
+		return
+	}
+
+	var repos []CachedRepoInfo
+	for _, rd := range repoDirs {
+		rdType := string(rd.Type())
+
+		// Filter by type if specified
+		if repoType != "" {
+			if repoType == "dataset" && rdType != "dataset" {
+				continue
+			}
+			if repoType == "model" && rdType != "model" {
+				continue
+			}
+		}
+
+		repos = append(repos, CachedRepoInfo{
+			Repo: rd.RepoID(),
+			Type: rdType,
+			Path: rd.Path(),
+		})
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"repos":    repos,
+		"count":    len(repos),
+		"cacheDir": cacheDir,
+	})
+}
+
+// handleCacheInfo returns details about a specific cached repository.
+func (s *Server) handleCacheInfo(w http.ResponseWriter, r *http.Request) {
+	repo := r.PathValue("repo")
+	if repo == "" {
+		writeError(w, http.StatusBadRequest, "Missing repository", "Format: /api/cache/owner/name")
+		return
+	}
+
+	cacheDir := s.config.CacheDir
+	if cacheDir == "" {
+		cacheDir = hfdownloader.DefaultCacheDir()
+	}
+
+	cache := hfdownloader.NewHFCache(cacheDir, 0)
+
+	// Try as model first
+	repoDir, err := cache.Repo(repo, hfdownloader.RepoTypeModel)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid repository format", err.Error())
+		return
+	}
+
+	// Check if the path exists
+	if _, err := os.Stat(repoDir.Path()); os.IsNotExist(err) {
+		// Try as dataset
+		repoDir, _ = cache.Repo(repo, hfdownloader.RepoTypeDataset)
+		if _, err := os.Stat(repoDir.Path()); os.IsNotExist(err) {
+			writeError(w, http.StatusNotFound, "Repository not found in cache", "")
+			return
+		}
+	}
+
+	// Get snapshots
+	snapshots, _ := repoDir.ListSnapshots()
+
+	info := CachedRepoInfo{
+		Repo:      repoDir.RepoID(),
+		Type:      string(repoDir.Type()),
+		Path:      repoDir.Path(),
+		Snapshots: snapshots,
+	}
+
+	writeJSON(w, http.StatusOK, info)
 }
