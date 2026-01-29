@@ -19,6 +19,7 @@ type JobStatus string
 const (
 	JobStatusQueued     JobStatus = "queued"
 	JobStatusRunning    JobStatus = "running"
+	JobStatusPaused     JobStatus = "paused"
 	JobStatusCompleted  JobStatus = "completed"
 	JobStatusFailed     JobStatus = "failed"
 	JobStatusCancelled  JobStatus = "cancelled"
@@ -41,7 +42,8 @@ type Job struct {
 	EndedAt   *time.Time        `json:"endedAt,omitempty"`
 	Files     []JobFileProgress `json:"files,omitempty"`
 
-	cancel context.CancelFunc `json:"-"`
+	cancel     context.CancelFunc `json:"-"`
+	generation int                `json:"-"` // Tracks which runJob instance is current
 }
 
 // JobProgress holds aggregate progress info.
@@ -165,7 +167,7 @@ func (m *JobManager) CancelJob(id string) bool {
 		return false
 	}
 
-	if job.Status == JobStatusQueued || job.Status == JobStatusRunning {
+	if job.Status == JobStatusQueued || job.Status == JobStatusRunning || job.Status == JobStatusPaused {
 		if job.cancel != nil {
 			job.cancel()
 		}
@@ -177,6 +179,58 @@ func (m *JobManager) CancelJob(id string) bool {
 	}
 
 	return false
+}
+
+// PauseJob pauses a running job.
+func (m *JobManager) PauseJob(id string) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	job, ok := m.jobs[id]
+	if !ok {
+		return false
+	}
+
+	if job.Status == JobStatusRunning {
+		if job.cancel != nil {
+			job.cancel()
+		}
+		job.Status = JobStatusPaused
+		m.notifyListeners(job)
+		return true
+	}
+
+	return false
+}
+
+// ResumeJob resumes a paused job.
+func (m *JobManager) ResumeJob(id string) bool {
+	m.mu.Lock()
+	job, ok := m.jobs[id]
+	if !ok {
+		m.mu.Unlock()
+		return false
+	}
+
+	if job.Status != JobStatusPaused {
+		m.mu.Unlock()
+		return false
+	}
+
+	job.Status = JobStatusQueued
+	// Reset progress - the downloader will re-scan and report all files
+	// Already-downloaded files will be skipped during actual download but reported in plan
+	job.Progress = JobProgress{}
+	job.Files = nil
+	m.mu.Unlock()
+
+	// Notify listeners of status change
+	m.notifyListeners(job)
+
+	// Restart the job - already downloaded files will be skipped by the downloader
+	go m.runJob(job)
+
+	return true
 }
 
 // DeleteJob removes a job from the list.
@@ -242,10 +296,12 @@ func (m *JobManager) notifyListeners(job *Job) {
 // runJob executes the download job.
 func (m *JobManager) runJob(job *Job) {
 	ctx, cancel := context.WithCancel(context.Background())
-	job.cancel = cancel
 
-	// Update status
+	// Increment generation and store our generation number
 	m.mu.Lock()
+	job.cancel = cancel
+	job.generation++
+	myGeneration := job.generation // Track which generation we are
 	job.Status = JobStatusRunning
 	now := time.Now()
 	job.StartedAt = &now
@@ -343,6 +399,13 @@ func (m *JobManager) runJob(job *Job) {
 
 	// Update final status
 	m.mu.Lock()
+	// Don't update status if:
+	// 1. Job was paused (user intentionally stopped it)
+	// 2. We're a stale goroutine (a newer runJob has started)
+	if job.Status == JobStatusPaused || job.generation != myGeneration {
+		m.mu.Unlock()
+		return
+	}
 	endTime := time.Now()
 	job.EndedAt = &endTime
 	if ctx.Err() != nil {

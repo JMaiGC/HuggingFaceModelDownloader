@@ -279,6 +279,42 @@ func (s *Server) handleCancelJob(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// handlePauseJob pauses a running job.
+func (s *Server) handlePauseJob(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if id == "" {
+		writeError(w, http.StatusBadRequest, "Missing job ID", "")
+		return
+	}
+
+	if s.jobs.PauseJob(id) {
+		writeJSON(w, http.StatusOK, SuccessResponse{
+			Success: true,
+			Message: "Job paused",
+		})
+	} else {
+		writeError(w, http.StatusNotFound, "Job not found or not running", "")
+	}
+}
+
+// handleResumeJob resumes a paused job.
+func (s *Server) handleResumeJob(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if id == "" {
+		writeError(w, http.StatusBadRequest, "Missing job ID", "")
+		return
+	}
+
+	if s.jobs.ResumeJob(id) {
+		writeJSON(w, http.StatusOK, SuccessResponse{
+			Success: true,
+			Message: "Job resumed",
+		})
+	} else {
+		writeError(w, http.StatusNotFound, "Job not found or not paused", "")
+	}
+}
+
 // handleGetSettings returns current settings.
 func (s *Server) handleGetSettings(w http.ResponseWriter, r *http.Request) {
 	// Don't expose full token, just indicate if set
@@ -379,8 +415,14 @@ func (s *Server) handleAnalyze(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Check if it's a dataset
+	// Check if it's a dataset (explicit selection)
 	isDataset := r.URL.Query().Get("dataset") == "true"
+
+	// Get revision (defaults to "main")
+	revision := r.URL.Query().Get("revision")
+	if revision == "" {
+		revision = "main"
+	}
 
 	// Create analyzer
 	opts := smartdl.AnalyzerOptions{
@@ -393,8 +435,18 @@ func (s *Server) handleAnalyze(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
 	defer cancel()
 
-	info, err := analyzer.Analyze(ctx, repo, isDataset)
+	info, err := analyzer.AnalyzeWithRevision(ctx, repo, isDataset, revision)
 	if err != nil {
+		// Check if both model and dataset exist
+		if err == smartdl.ErrBothExist {
+			writeJSON(w, http.StatusOK, map[string]any{
+				"needsSelection": true,
+				"repo":           repo,
+				"message":        "This repository exists as both a model and a dataset. Please select which one you want to analyze.",
+				"options":        []string{"model", "dataset"},
+			})
+			return
+		}
 		writeError(w, http.StatusInternalServerError, "Analysis failed", err.Error())
 		return
 	}

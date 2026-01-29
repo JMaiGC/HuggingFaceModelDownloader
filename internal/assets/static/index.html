@@ -70,8 +70,8 @@
       <section class="page active" id="page-analyze">
         <header class="page-header">
           <div>
-            <h1>Analyze Repository</h1>
-            <p class="page-subtitle">Inspect any HuggingFace model or dataset before downloading</p>
+            <h1>Analyze</h1>
+            <p class="page-subtitle">Inspect any HuggingFace model or dataset - auto-detected</p>
           </div>
         </header>
 
@@ -84,14 +84,10 @@
               type="text"
               id="analyzeInput"
               class="search-input"
-              placeholder="Enter repository (e.g., TheBloke/Mistral-7B-GGUF)"
+              placeholder="Enter model or dataset (e.g., meta-llama/Llama-3-8B or wikitext)"
               autocomplete="off"
               spellcheck="false"
             >
-            <label class="dataset-toggle">
-              <input type="checkbox" id="analyzeDataset">
-              <span>Dataset</span>
-            </label>
             <button class="btn btn-primary" id="analyzeBtn">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18">
                 <circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/>
@@ -109,13 +105,44 @@
                   <line x1="12" y1="22.08" x2="12" y2="12"/>
                 </svg>
               </div>
-              <h3>Analyze a Repository</h3>
-              <p>Enter a HuggingFace repository ID to see detailed information about its type, files, and recommended download options.</p>
+              <h3>Analyze Model or Dataset</h3>
+              <p>Enter a HuggingFace model or dataset ID - we'll auto-detect the type and show files, size, and download options.</p>
               <div class="example-repos">
-                <span class="example-label">Try:</span>
-                <button class="example-btn" data-repo="TheBloke/Mistral-7B-Instruct-v0.2-GGUF">TheBloke/Mistral-7B-Instruct-v0.2-GGUF</button>
-                <button class="example-btn" data-repo="stabilityai/stable-diffusion-xl-base-1.0">stabilityai/stable-diffusion-xl-base-1.0</button>
-                <button class="example-btn" data-repo="openai/whisper-large-v3">openai/whisper-large-v3</button>
+                <span class="example-label">GGUF:</span>
+                <button class="example-btn" data-repo="TheBloke/Mistral-7B-Instruct-v0.2-GGUF">Mistral-7B-GGUF</button>
+                <button class="example-btn" data-repo="bartowski/Meta-Llama-3-8B-Instruct-GGUF">Llama-3-8B-GGUF</button>
+              </div>
+              <div class="example-repos">
+                <span class="example-label">Transformers:</span>
+                <button class="example-btn" data-repo="meta-llama/Meta-Llama-3-8B-Instruct">Llama-3-8B</button>
+                <button class="example-btn" data-repo="microsoft/Phi-3-mini-4k-instruct">Phi-3-mini</button>
+              </div>
+              <div class="example-repos">
+                <span class="example-label">Diffusers:</span>
+                <button class="example-btn" data-repo="stabilityai/stable-diffusion-xl-base-1.0">SDXL-base</button>
+                <button class="example-btn" data-repo="black-forest-labs/FLUX.1-schnell">FLUX.1-schnell</button>
+              </div>
+              <div class="example-repos">
+                <span class="example-label">Quantized:</span>
+                <button class="example-btn" data-repo="TheBloke/Llama-2-7B-Chat-GPTQ">Llama-2-GPTQ</button>
+                <button class="example-btn" data-repo="TheBloke/Llama-2-7B-Chat-AWQ">Llama-2-AWQ</button>
+              </div>
+              <div class="example-repos">
+                <span class="example-label">Audio/Vision:</span>
+                <button class="example-btn" data-repo="openai/whisper-large-v3">Whisper-v3</button>
+                <button class="example-btn" data-repo="google/vit-base-patch16-224">ViT-base</button>
+              </div>
+              <div class="example-repos">
+                <span class="example-label">Other:</span>
+                <button class="example-btn" data-repo="Xenova/all-MiniLM-L6-v2">ONNX-MiniLM</button>
+                <button class="example-btn" data-repo="llava-hf/llava-1.5-7b-hf">LLaVA-1.5</button>
+                <button class="example-btn" data-repo="predibase/glue_stsb">LoRA-adapter</button>
+              </div>
+              <div class="example-repos">
+                <span class="example-label">Datasets:</span>
+                <button class="example-btn" data-repo="roneneldan/TinyStories" data-type="dataset">TinyStories</button>
+                <button class="example-btn" data-repo="fka/awesome-chatgpt-prompts" data-type="dataset">ChatGPT-Prompts</button>
+                <button class="example-btn" data-repo="wikitext" data-type="dataset">WikiText</button>
               </div>
             </div>
           </div>

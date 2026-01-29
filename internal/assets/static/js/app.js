@@ -136,7 +136,7 @@
 
   function updateJobsBadge() {
     const activeCount = Array.from(state.jobs.values())
-      .filter(j => j.status === 'running' || j.status === 'queued').length;
+      .filter(j => j.status === 'running' || j.status === 'queued' || j.status === 'paused').length;
 
     const badge = $('#jobsBadge');
     if (badge) {
@@ -176,7 +176,6 @@
   function initAnalyzePage() {
     const input = $('#analyzeInput');
     const btn = $('#analyzeBtn');
-    const datasetCheckbox = $('#analyzeDataset');
 
     // Enter key
     input?.addEventListener('keypress', (e) => {
@@ -190,15 +189,21 @@
     $$('.example-btn').forEach(btn => {
       btn.addEventListener('click', () => {
         if (input) input.value = btn.dataset.repo;
-        analyzeRepo();
+        // Pass 'dataset' type if specified on button
+        const forceType = btn.dataset.type || null;
+        analyzeRepo(forceType);
       });
     });
   }
 
-  async function analyzeRepo() {
+  // Store current analysis for wizard
+  let currentAnalysis = null;
+  let hasShownRevisionPicker = false; // Track if we've shown picker for this repo
+
+  async function analyzeRepo(forceType = null, revision = null) {
     const input = $('#analyzeInput');
     const resultDiv = $('#analyzeResult');
-    const isDataset = $('#analyzeDataset')?.checked || false;
+    const isDataset = forceType === 'dataset'; // Only set if user explicitly selected dataset
 
     const repo = input?.value.trim();
     if (!repo) {
@@ -206,17 +211,41 @@
       return;
     }
 
+    // Reset revision picker flag when analyzing a new repo
+    if (!revision) {
+      hasShownRevisionPicker = false;
+    }
+
     // Show loading
     resultDiv.innerHTML = `
       <div class="loading-state">
         <div class="spinner"></div>
-        <p>Analyzing ${repo}...</p>
+        <p>Analyzing ${repo}${revision && revision !== 'main' ? ` (${revision})` : ''}...</p>
       </div>
     `;
 
     try {
-      const queryParam = isDataset ? '?dataset=true' : '';
-      const data = await api('GET', `/analyze/${repo}${queryParam}`);
+      let queryParams = [];
+      if (forceType) queryParams.push(`dataset=${forceType === 'dataset'}`);
+      if (revision) queryParams.push(`revision=${encodeURIComponent(revision)}`);
+      const queryString = queryParams.length > 0 ? `?${queryParams.join('&')}` : '';
+
+      const data = await api('GET', `/analyze/${repo}${queryString}`);
+
+      // Check if we need user to select model vs dataset
+      if (data.needsSelection) {
+        renderTypeSelection(data);
+        return;
+      }
+
+      // Check if there are multiple refs and we haven't shown the picker yet
+      if (data.refs && data.refs.length > 1 && !hasShownRevisionPicker && !revision) {
+        hasShownRevisionPicker = true;
+        showRevisionPicker(data);
+        return;
+      }
+
+      currentAnalysis = data;
       renderAnalysisResult(data);
     } catch (e) {
       resultDiv.innerHTML = `
@@ -232,6 +261,113 @@
       `;
     }
   }
+
+  // Show revision picker when multiple refs exist
+  function showRevisionPicker(data) {
+    const branches = data.refs.filter(r => r.type === 'branch');
+    const tags = data.refs.filter(r => r.type === 'tag');
+
+    let branchesHtml = '';
+    if (branches.length > 0) {
+      branchesHtml = `
+        <div class="ref-group">
+          <h5>Branches</h5>
+          <div class="ref-list">
+            ${branches.map(b => `
+              <button class="ref-btn ${b.name === 'main' ? 'ref-default' : ''}" onclick="selectRevision('${escapeHtml(b.name)}', ${data.is_dataset})">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16">
+                  <line x1="6" y1="3" x2="6" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/>
+                </svg>
+                ${escapeHtml(b.name)}
+                ${b.name === 'main' ? '<span class="ref-badge">default</span>' : ''}
+              </button>
+            `).join('')}
+          </div>
+        </div>
+      `;
+    }
+
+    let tagsHtml = '';
+    if (tags.length > 0) {
+      tagsHtml = `
+        <div class="ref-group">
+          <h5>Tags</h5>
+          <div class="ref-list">
+            ${tags.slice(0, 10).map(t => `
+              <button class="ref-btn" onclick="selectRevision('${escapeHtml(t.name)}', ${data.is_dataset})">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16">
+                  <path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/><line x1="7" y1="7" x2="7.01" y2="7"/>
+                </svg>
+                ${escapeHtml(t.name)}
+              </button>
+            `).join('')}
+            ${tags.length > 10 ? `<div class="ref-more">... and ${tags.length - 10} more tags</div>` : ''}
+          </div>
+        </div>
+      `;
+    }
+
+    showModal('Select Revision', `
+      <p style="margin-bottom: 16px; color: var(--color-text-secondary);">
+        This repository has multiple versions. Select which one to analyze:
+      </p>
+      ${branchesHtml}
+      ${tagsHtml}
+      <div class="form-actions" style="margin-top: 20px;">
+        <button class="btn btn-ghost" onclick="hideModal(); selectRevision('main', ${data.is_dataset})">Use default (main)</button>
+      </div>
+    `);
+  }
+
+  // Handle revision selection
+  window.selectRevision = function(revision, isDataset) {
+    hideModal();
+    const forceType = isDataset ? 'dataset' : null;
+    analyzeRepo(forceType, revision);
+  };
+
+  // Show revision picker from analysis result (user clicked "change")
+  window.showRevisionPickerFromAnalysis = function() {
+    if (currentAnalysis && currentAnalysis.refs) {
+      hasShownRevisionPicker = false; // Allow showing picker again
+      showRevisionPicker(currentAnalysis);
+    }
+  };
+
+  // Render type selection when both model and dataset exist
+  function renderTypeSelection(data) {
+    const resultDiv = $('#analyzeResult');
+    resultDiv.innerHTML = `
+      <div class="analysis-card">
+        <div class="analysis-header">
+          <div class="analysis-repo">${escapeHtml(data.repo)}</div>
+          <span class="analysis-type" style="background: var(--color-warning);">Selection Required</span>
+        </div>
+        <div class="analysis-body">
+          <div class="analysis-section">
+            <h4>${escapeHtml(data.message)}</h4>
+            <div style="display: flex; gap: 16px; margin-top: 20px;">
+              <button class="btn btn-primary" onclick="analyzeRepo('model')">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="20" height="20" style="margin-right: 8px;">
+                  <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/>
+                </svg>
+                Analyze as Model
+              </button>
+              <button class="btn btn-secondary" onclick="analyzeRepo('dataset')">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="20" height="20" style="margin-right: 8px;">
+                  <ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/>
+                </svg>
+                Analyze as Dataset
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
+  // Make analyzeRepo available globally for type selection buttons
+  window.analyzeRepo = analyzeRepo;
 
   function renderAnalysisResult(data) {
     const resultDiv = $('#analyzeResult');
@@ -272,11 +408,18 @@
 
     if (data.gguf) {
       const g = data.gguf;
-      const quantsHtml = g.quantizations?.slice(0, 10).map(q => `
-        <div class="analysis-file">
-          <span class="analysis-file-name">${escapeHtml(q.name)}</span>
-          <span class="analysis-file-size">${q.file?.size_human || ''} / ~${q.estimated_ram_human || ''} RAM</span>
-        </div>
+      const quantsHtml = g.quantizations?.map((q, i) => `
+        <label class="quant-option">
+          <input type="checkbox" name="quant" value="${escapeHtml(q.name)}" data-filter="${escapeHtml(q.name.toLowerCase())}" ${i === 0 ? 'checked' : ''}>
+          <div class="quant-info">
+            <div class="quant-header">
+              <span class="quant-name">${escapeHtml(q.name)}</span>
+              <span class="quant-stars">${q.quality_stars || ''}</span>
+            </div>
+            <span class="quant-desc">${escapeHtml(q.description || '')}</span>
+            <span class="quant-details">${q.file?.size_human || ''} / ~${q.estimated_ram_human || ''} RAM</span>
+          </div>
+        </label>
       `).join('') || '';
 
       typeInfoHtml = `
@@ -287,7 +430,15 @@
             ${g.parameter_count ? `<div class="analysis-stat"><div class="analysis-stat-label">Parameters</div><div class="analysis-stat-value">${escapeHtml(g.parameter_count)}</div></div>` : ''}
           </div>
         </div>
-        ${quantsHtml ? `<div class="analysis-section"><h4>Available Quantizations</h4><div class="analysis-files">${quantsHtml}</div></div>` : ''}
+        ${quantsHtml ? `
+          <div class="analysis-section">
+            <h4>Select Quantizations to Download</h4>
+            <p style="font-size: 13px; color: var(--color-text-muted); margin-bottom: 12px;">Choose which quantization(s) you want to download:</p>
+            <div class="quant-options" id="quantOptions">
+              ${quantsHtml}
+            </div>
+          </div>
+        ` : ''}
       `;
     }
 
@@ -326,10 +477,37 @@
       `;
     }
 
+    // Determine if we have selectable options (GGUF quantizations)
+    const hasQuantOptions = data.gguf?.quantizations?.length > 0;
+
+    // Build the download command
+    let baseCmd = `hfdownloader -r ${data.repo}`;
+    if (data.is_dataset) {
+      baseCmd += ' -d';
+    }
+    if (data.branch && data.branch !== 'main') {
+      baseCmd += ` -b ${data.branch}`;
+    }
+
+    // Build branch/revision display
+    const branchDisplay = data.branch && data.branch !== 'main'
+      ? `<span class="analysis-branch" title="Revision: ${escapeHtml(data.branch)}">
+           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14">
+             <line x1="6" y1="3" x2="6" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/>
+           </svg>
+           ${escapeHtml(data.branch)}
+         </span>`
+      : '';
+
+    // Show "Change" link if multiple refs available
+    const changeRevisionLink = data.refs && data.refs.length > 1
+      ? `<button class="btn-link" onclick="showRevisionPickerFromAnalysis()">change</button>`
+      : '';
+
     resultDiv.innerHTML = `
       <div class="analysis-card">
         <div class="analysis-header">
-          <div class="analysis-repo">${escapeHtml(data.repo)}</div>
+          <div class="analysis-repo">${escapeHtml(data.repo)}${branchDisplay}${changeRevisionLink}</div>
           <span class="analysis-type">${escapeHtml(data.type_description || data.type)}</span>
           <div class="analysis-meta">
             <span>${data.file_count} files</span>
@@ -346,14 +524,210 @@
             </div>
           </div>
         </div>
-        <div class="analysis-actions">
-          <button class="btn btn-primary" onclick="downloadFromAnalysis('${escapeHtml(data.repo)}', ${data.is_dataset})">
-            Download
-          </button>
+        <div class="analysis-actions-wrapper">
+          <div class="command-preview">
+            <label>Download Command:</label>
+            <code id="downloadCommand">${escapeHtml(baseCmd)}</code>
+            <button class="btn btn-ghost btn-sm" onclick="copyCommand()" title="Copy to clipboard">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16">
+                <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+              </svg>
+            </button>
+          </div>
+          <div class="analysis-actions">
+            <button class="btn btn-ghost" onclick="clearAnalysis()">
+              Clear
+            </button>
+            <button class="btn btn-secondary" onclick="showAdvancedOptions()">
+              Advanced Options
+            </button>
+            <button class="btn btn-primary" onclick="startWizardDownload('${escapeHtml(data.repo)}', ${data.is_dataset})">
+              Download
+            </button>
+          </div>
         </div>
       </div>
     `;
+
+    // Update command when checkboxes change
+    if (hasQuantOptions) {
+      updateDownloadCommand();
+      document.querySelectorAll('#quantOptions input[type="checkbox"]').forEach(cb => {
+        cb.addEventListener('change', updateDownloadCommand);
+      });
+    }
   }
+
+  // Clear analysis and reset to initial state
+  window.clearAnalysis = function() {
+    currentAnalysis = null;
+    advancedOptions = { filter: '', exclude: '' };
+    const input = $('#analyzeInput');
+    if (input) input.value = '';
+
+    const resultDiv = $('#analyzeResult');
+    if (resultDiv) {
+      resultDiv.innerHTML = `
+        <div class="empty-state">
+          <div class="empty-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="64" height="64">
+              <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/>
+              <polyline points="3.27 6.96 12 12.01 20.73 6.96"/>
+              <line x1="12" y1="22.08" x2="12" y2="12"/>
+            </svg>
+          </div>
+          <h3>Analyze Model or Dataset</h3>
+          <p>Enter a HuggingFace model or dataset ID - we'll auto-detect the type and show files, size, and download options.</p>
+          <div class="example-repos">
+            <span class="example-label">GGUF:</span>
+            <button class="example-btn" data-repo="TheBloke/Mistral-7B-Instruct-v0.2-GGUF">Mistral-7B-GGUF</button>
+            <button class="example-btn" data-repo="bartowski/Meta-Llama-3-8B-Instruct-GGUF">Llama-3-8B-GGUF</button>
+          </div>
+          <div class="example-repos">
+            <span class="example-label">Transformers:</span>
+            <button class="example-btn" data-repo="meta-llama/Meta-Llama-3-8B-Instruct">Llama-3-8B</button>
+            <button class="example-btn" data-repo="microsoft/Phi-3-mini-4k-instruct">Phi-3-mini</button>
+          </div>
+          <div class="example-repos">
+            <span class="example-label">Diffusers:</span>
+            <button class="example-btn" data-repo="stabilityai/stable-diffusion-xl-base-1.0">SDXL-base</button>
+            <button class="example-btn" data-repo="black-forest-labs/FLUX.1-schnell">FLUX.1-schnell</button>
+          </div>
+          <div class="example-repos">
+            <span class="example-label">Datasets:</span>
+            <button class="example-btn" data-repo="roneneldan/TinyStories" data-type="dataset">TinyStories</button>
+            <button class="example-btn" data-repo="fka/awesome-chatgpt-prompts" data-type="dataset">ChatGPT-Prompts</button>
+          </div>
+        </div>
+      `;
+      // Re-attach example button handlers
+      $$('.example-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          if (input) input.value = btn.dataset.repo;
+          const forceType = btn.dataset.type || null;
+          analyzeRepo(forceType);
+        });
+      });
+    }
+  };
+
+  // Update the download command based on selected quantizations and advanced options
+  function updateDownloadCommand() {
+    const commandEl = $('#downloadCommand');
+    if (!commandEl || !currentAnalysis) return;
+
+    const selectedQuants = Array.from(document.querySelectorAll('#quantOptions input[type="checkbox"]:checked'))
+      .map(cb => cb.dataset.filter);
+
+    let cmd = `hfdownloader -r ${currentAnalysis.repo}`;
+
+    // Add dataset flag
+    if (currentAnalysis.is_dataset) {
+      cmd += ' -d';
+    }
+
+    // Add revision if not main (from analysis)
+    if (currentAnalysis.branch && currentAnalysis.branch !== 'main') {
+      cmd += ` -b ${currentAnalysis.branch}`;
+    }
+
+    // Add filters - either from GGUF selection or advanced options
+    if (selectedQuants.length > 0 && selectedQuants.length < (currentAnalysis.gguf?.quantizations?.length || 0)) {
+      cmd += ` -f "${selectedQuants.join(',')}"`;
+    } else if (advancedOptions.filter) {
+      cmd += ` -f "${advancedOptions.filter}"`;
+    }
+
+    // Add excludes
+    if (advancedOptions.exclude) {
+      cmd += ` -e "${advancedOptions.exclude}"`;
+    }
+
+    commandEl.textContent = cmd;
+  }
+
+  // Copy command to clipboard
+  window.copyCommand = function() {
+    const commandEl = $('#downloadCommand');
+    if (commandEl) {
+      navigator.clipboard.writeText(commandEl.textContent);
+      showToast('Command copied to clipboard', 'success');
+    }
+  };
+
+  // Store advanced options (filter/exclude only - revision comes from analysis)
+  let advancedOptions = {
+    filter: '',
+    exclude: ''
+  };
+
+  // Show advanced options modal
+  window.showAdvancedOptions = function() {
+    if (!currentAnalysis) return;
+
+    showModal('Advanced Options', `
+      <div class="form-group">
+        <label for="advFilter">File Filter (comma-separated)</label>
+        <input type="text" id="advFilter" value="${escapeHtml(advancedOptions.filter)}" placeholder="e.g., q4_k_m,q5_k_m">
+        <p class="form-hint">Only download files matching these patterns</p>
+      </div>
+      <div class="form-group">
+        <label for="advExclude">Exclude Filter (comma-separated)</label>
+        <input type="text" id="advExclude" value="${escapeHtml(advancedOptions.exclude)}" placeholder="e.g., fp16,bf16">
+        <p class="form-hint">Skip files matching these patterns</p>
+      </div>
+      <div class="form-actions">
+        <button class="btn btn-secondary" onclick="hideModal()">Cancel</button>
+        <button class="btn btn-primary" onclick="applyAdvancedOptions()">Apply</button>
+      </div>
+    `);
+  };
+
+  // Apply advanced options and update command preview
+  window.applyAdvancedOptions = function() {
+    advancedOptions.filter = $('#advFilter')?.value || '';
+    advancedOptions.exclude = $('#advExclude')?.value || '';
+
+    hideModal();
+    updateDownloadCommand();
+    showToast('Options applied', 'success');
+  };
+
+  // Start download from wizard with selected options
+  window.startWizardDownload = async function(repo, isDataset) {
+    // Get selected quantizations if any
+    const selectedQuants = Array.from(document.querySelectorAll('#quantOptions input[type="checkbox"]:checked'))
+      .map(cb => cb.dataset.filter);
+
+    // Build filters - prefer GGUF selection, fallback to advanced options
+    let filters = [];
+    if (selectedQuants.length > 0) {
+      filters = selectedQuants;
+    } else if (advancedOptions.filter) {
+      filters = advancedOptions.filter.split(',').map(s => s.trim()).filter(Boolean);
+    }
+
+    // Build excludes from advanced options
+    const excludes = advancedOptions.exclude
+      ? advancedOptions.exclude.split(',').map(s => s.trim()).filter(Boolean)
+      : [];
+
+    try {
+      const body = {
+        repo,
+        revision: currentAnalysis?.branch || 'main',
+        dataset: isDataset,
+        filters,
+        excludes
+      };
+
+      await api('POST', '/download', body);
+      showToast(`Download started: ${repo}`, 'success');
+      navigateTo('jobs');
+    } catch (e) {
+      showToast(`Failed: ${e.message}`, 'error');
+    }
+  };
 
   // Make downloadFromAnalysis available globally
   window.downloadFromAnalysis = function(repo, isDataset) {
@@ -510,6 +884,29 @@
       const speed = p.bytesPerSecond || 0;
       const status = job.status || 'queued';
 
+      // Determine which action buttons to show
+      const isRunning = status === 'running';
+      const isQueued = status === 'queued';
+      const isPaused = status === 'paused';
+      const isDone = status === 'completed' || status === 'failed' || status === 'cancelled';
+
+      let actionButtons = '';
+      if (isRunning) {
+        actionButtons = `
+          <button class="btn btn-sm btn-warning" onclick="pauseJob('${escapeHtml(job.id)}')">Pause</button>
+          <button class="btn btn-sm btn-danger" onclick="cancelJob('${escapeHtml(job.id)}')">Cancel</button>
+        `;
+      } else if (isPaused) {
+        actionButtons = `
+          <button class="btn btn-sm btn-primary" onclick="resumeJob('${escapeHtml(job.id)}')">Resume</button>
+          <button class="btn btn-sm btn-danger" onclick="cancelJob('${escapeHtml(job.id)}')">Cancel</button>
+        `;
+      } else if (isQueued) {
+        actionButtons = `<button class="btn btn-sm btn-danger" onclick="cancelJob('${escapeHtml(job.id)}')">Cancel</button>`;
+      } else if (isDone) {
+        actionButtons = `<button class="btn btn-sm btn-secondary" onclick="dismissJob('${escapeHtml(job.id)}')">Dismiss</button>`;
+      }
+
       return `
         <div class="job-card">
           <div class="job-header">
@@ -517,7 +914,10 @@
               <div class="job-repo">${escapeHtml(job.repo)}</div>
               <div style="font-size: 13px; color: var(--color-text-muted);">${escapeHtml(job.revision || 'main')}</div>
             </div>
-            <span class="job-status ${status}">${status}</span>
+            <div class="job-header-right">
+              <span class="job-status ${status}">${status}</span>
+              ${actionButtons}
+            </div>
           </div>
           <div class="job-progress">
             <div class="progress-bar">
@@ -530,10 +930,70 @@
             <span>${formatBytes(downloadedBytes)} / ${formatBytes(totalBytes)}</span>
             <span>${p.completedFiles || 0} / ${p.totalFiles || 0} files</span>
           </div>
+          ${job.error ? `<div class="job-error">${escapeHtml(job.error)}</div>` : ''}
         </div>
       `;
     }).join('');
   }
+
+  // Cancel a running/queued job
+  window.cancelJob = async function(jobId) {
+    try {
+      await api('DELETE', `/jobs/${jobId}`);
+      showToast('Download cancelled', 'success');
+      // Update local state immediately
+      const job = state.jobs.get(jobId);
+      if (job) {
+        job.status = 'cancelled';
+        state.jobs.set(jobId, job);
+        renderJobs();
+        updateJobsBadge();
+      }
+    } catch (e) {
+      showToast(`Failed to cancel: ${e.message}`, 'error');
+    }
+  };
+
+  // Pause a running job
+  window.pauseJob = async function(jobId) {
+    try {
+      await api('POST', `/jobs/${jobId}/pause`);
+      showToast('Download paused', 'success');
+      const job = state.jobs.get(jobId);
+      if (job) {
+        job.status = 'paused';
+        state.jobs.set(jobId, job);
+        renderJobs();
+        updateJobsBadge();
+      }
+    } catch (e) {
+      showToast(`Failed to pause: ${e.message}`, 'error');
+    }
+  };
+
+  // Resume a paused job
+  window.resumeJob = async function(jobId) {
+    try {
+      await api('POST', `/jobs/${jobId}/resume`);
+      showToast('Download resumed', 'success');
+      const job = state.jobs.get(jobId);
+      if (job) {
+        job.status = 'queued';
+        state.jobs.set(jobId, job);
+        renderJobs();
+        updateJobsBadge();
+      }
+    } catch (e) {
+      showToast(`Failed to resume: ${e.message}`, 'error');
+    }
+  };
+
+  // Dismiss (remove from view) a completed/failed/cancelled job
+  window.dismissJob = function(jobId) {
+    state.jobs.delete(jobId);
+    renderJobs();
+    updateJobsBadge();
+  };
 
   // =========================================
   // Cache Page
@@ -704,6 +1164,9 @@
   function hideModal() {
     $('#modalBackdrop').classList.remove('active');
   }
+
+  // Expose hideModal globally for onclick handlers
+  window.hideModal = hideModal;
 
   function initModal() {
     $('#modalClose')?.addEventListener('click', hideModal);

@@ -131,6 +131,18 @@ type FileInfo struct {
 	Directory string `json:"directory,omitempty"`
 }
 
+// RepoRef represents a branch or tag in the repository.
+type RepoRef struct {
+	// Name is the ref name (e.g., "main", "v1.0", "fp16").
+	Name string `json:"name"`
+
+	// Type is "branch" or "tag".
+	Type string `json:"type"`
+
+	// Commit is the commit SHA this ref points to.
+	Commit string `json:"commit,omitempty"`
+}
+
 // RepoInfo contains analyzed information about a HuggingFace repository.
 type RepoInfo struct {
 	// Repo is the repository ID in "owner/name" format.
@@ -162,6 +174,9 @@ type RepoInfo struct {
 
 	// Branch is the branch/revision name.
 	Branch string `json:"branch,omitempty"`
+
+	// Refs is the list of available branches and tags.
+	Refs []RepoRef `json:"refs,omitempty"`
 
 	// AnalyzedAt is when the analysis was performed.
 	AnalyzedAt time.Time `json:"analyzed_at"`

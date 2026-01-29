@@ -141,12 +141,15 @@ func parseGGUFQuantization(f FileInfo) *GGUFQuantization {
 	matches := quantPattern.FindStringSubmatch(name)
 	if len(matches) < 2 {
 		// No recognized quantization, might be a split file or unknown format
+		ram := estimateRAM(f.Size)
 		return &GGUFQuantization{
-			Name:        "Unknown",
-			File:        f,
-			Quality:     3,
-			EstimatedRAM: estimateRAM(f.Size),
-			Description: "Unknown quantization format",
+			Name:             "Unknown",
+			File:             f,
+			Quality:          3,
+			QualityStars:     qualityToStars(3),
+			EstimatedRAM:     ram,
+			EstimatedRAMHuman: humanSize(ram),
+			Description:      "Unknown quantization format",
 		}
 	}
 
@@ -161,13 +164,23 @@ func parseGGUFQuantization(f FileInfo) *GGUFQuantization {
 		desc = "Quantized model"
 	}
 
+	ram := estimateRAM(f.Size)
 	return &GGUFQuantization{
-		Name:        quantType,
-		File:        f,
-		Quality:     quality,
-		EstimatedRAM: estimateRAM(f.Size),
-		Description: desc,
+		Name:             quantType,
+		File:             f,
+		Quality:          quality,
+		QualityStars:     qualityToStars(quality),
+		EstimatedRAM:     ram,
+		EstimatedRAMHuman: humanSize(ram),
+		Description:      desc,
 	}
+}
+
+// qualityToStars converts a 1-5 quality rating to star representation.
+func qualityToStars(quality int) string {
+	filled := quality
+	empty := 5 - quality
+	return strings.Repeat("★", filled) + strings.Repeat("☆", empty)
 }
 
 // estimateRAM estimates RAM usage for a GGUF file.

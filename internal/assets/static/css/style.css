@@ -314,6 +314,29 @@ a {
   color: var(--color-text);
 }
 
+.btn-danger {
+  background: var(--color-error);
+  color: white;
+}
+
+.btn-danger:hover:not(:disabled) {
+  background: #dc2626;
+}
+
+.btn-warning {
+  background: var(--color-warning);
+  color: #000;
+}
+
+.btn-warning:hover:not(:disabled) {
+  background: #d97706;
+}
+
+.btn-sm {
+  padding: 6px 12px;
+  font-size: 12px;
+}
+
 /* ============================================
    Cards
    ============================================ */
@@ -536,21 +559,29 @@ a {
   flex-wrap: wrap;
   align-items: center;
   justify-content: center;
-  gap: 8px;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.example-repos:last-child {
+  margin-bottom: 0;
 }
 
 .example-label {
-  font-size: 13px;
+  font-size: 11px;
   color: var(--color-text-muted);
+  min-width: 80px;
+  text-align: right;
+  padding-right: 4px;
 }
 
 .example-btn {
   background: var(--color-surface);
   border: 1px solid var(--color-border);
   color: var(--color-text-secondary);
-  padding: 6px 12px;
+  padding: 4px 10px;
   border-radius: var(--radius-md);
-  font-size: 12px;
+  font-size: 11px;
   font-family: var(--font-mono);
   cursor: pointer;
   transition: all var(--transition-fast);
@@ -682,12 +713,203 @@ a {
   margin-left: 16px;
 }
 
-.analysis-actions {
-  display: flex;
-  gap: 12px;
+.analysis-actions-wrapper {
   padding: 20px 24px;
   border-top: 1px solid var(--color-border);
   background: var(--color-bg-tertiary);
+}
+
+.analysis-actions {
+  display: flex;
+  gap: 12px;
+  justify-content: flex-end;
+}
+
+/* Command preview */
+.command-preview {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 16px;
+  padding: 12px 16px;
+  background: var(--color-bg);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-border);
+}
+
+.command-preview label {
+  font-size: 12px;
+  color: var(--color-text-muted);
+  flex-shrink: 0;
+}
+
+.command-preview code {
+  flex: 1;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  color: var(--color-text);
+  overflow-x: auto;
+  white-space: nowrap;
+}
+
+/* Revision picker */
+.ref-group {
+  margin-bottom: 16px;
+}
+
+.ref-group h5 {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 8px;
+}
+
+.ref-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.ref-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  font-family: var(--font-mono);
+  font-size: 13px;
+  color: var(--color-text);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.ref-btn:hover {
+  background: var(--color-surface-hover);
+  border-color: var(--color-primary);
+}
+
+.ref-btn.ref-default {
+  border-color: var(--color-primary);
+  background: rgba(99, 102, 241, 0.1);
+}
+
+.ref-badge {
+  font-size: 10px;
+  padding: 2px 6px;
+  background: var(--color-primary);
+  color: white;
+  border-radius: var(--radius-sm);
+  font-family: var(--font-sans);
+}
+
+.ref-more {
+  font-size: 12px;
+  color: var(--color-text-muted);
+  padding: 8px;
+}
+
+/* Branch display in analysis header */
+.analysis-branch {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: 10px;
+  padding: 2px 8px;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  font-family: var(--font-mono);
+  color: var(--color-text-secondary);
+}
+
+.btn-link {
+  background: none;
+  border: none;
+  padding: 0;
+  margin-left: 8px;
+  font-size: 12px;
+  color: var(--color-primary);
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+.btn-link:hover {
+  color: var(--color-primary-hover);
+}
+
+/* Quantization options */
+.quant-options {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.quant-option {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px;
+  background: var(--color-bg-tertiary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.quant-option:hover {
+  border-color: var(--color-primary);
+  background: var(--color-surface);
+}
+
+.quant-option input[type="checkbox"] {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--color-primary);
+  cursor: pointer;
+}
+
+.quant-option input[type="checkbox"]:checked + .quant-info {
+  color: var(--color-text);
+}
+
+.quant-info {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  gap: 2px;
+}
+
+.quant-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.quant-name {
+  font-weight: 600;
+  font-family: var(--font-mono);
+  font-size: 14px;
+}
+
+.quant-stars {
+  font-size: 12px;
+  color: #fbbf24;
+}
+
+.quant-desc {
+  font-size: 12px;
+  color: var(--color-text-muted);
+}
+
+.quant-details {
+  font-size: 11px;
+  color: var(--color-text-muted);
+  opacity: 0.8;
 }
 
 /* ============================================
@@ -731,6 +953,12 @@ a {
   margin-bottom: 16px;
 }
 
+.job-header-right {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
 .job-repo {
   font-size: 16px;
   font-weight: 600;
@@ -747,7 +975,8 @@ a {
   font-weight: 500;
 }
 
-.job-status.downloading {
+.job-status.downloading,
+.job-status.running {
   background: rgba(59, 130, 246, 0.2);
   color: var(--color-info);
 }
@@ -757,7 +986,8 @@ a {
   color: var(--color-success);
 }
 
-.job-status.error {
+.job-status.error,
+.job-status.failed {
   background: rgba(239, 68, 68, 0.2);
   color: var(--color-error);
 }
@@ -765,6 +995,26 @@ a {
 .job-status.queued {
   background: rgba(245, 158, 11, 0.2);
   color: var(--color-warning);
+}
+
+.job-status.cancelled {
+  background: rgba(107, 114, 128, 0.2);
+  color: var(--color-text-muted);
+}
+
+.job-status.paused {
+  background: rgba(245, 158, 11, 0.2);
+  color: var(--color-warning);
+}
+
+.job-error {
+  margin-top: 12px;
+  padding: 10px 14px;
+  background: rgba(239, 68, 68, 0.1);
+  border: 1px solid rgba(239, 68, 68, 0.2);
+  border-radius: var(--radius-md);
+  font-size: 13px;
+  color: var(--color-error);
 }
 
 .job-progress {

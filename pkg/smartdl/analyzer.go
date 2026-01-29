@@ -62,13 +62,25 @@ func NewAnalyzer(opts AnalyzerOptions) *Analyzer {
 	}
 }
 
-// Analyze fetches and analyzes a HuggingFace repository.
+// Analyze fetches and analyzes a HuggingFace repository using the default "main" revision.
+// If isDataset is false, it will first try to fetch as a model, then as a dataset if not found.
 func (a *Analyzer) Analyze(ctx context.Context, repo string, isDataset bool) (*RepoInfo, error) {
-	// Fetch file tree
-	files, err := a.fetchFileTree(ctx, repo, isDataset, "main")
+	return a.AnalyzeWithRevision(ctx, repo, isDataset, "main")
+}
+
+// AnalyzeWithRevision fetches and analyzes a HuggingFace repository at a specific revision.
+// If isDataset is false, it will first try to fetch as a model, then as a dataset if not found.
+func (a *Analyzer) AnalyzeWithRevision(ctx context.Context, repo string, isDataset bool, revision string) (*RepoInfo, error) {
+	if revision == "" {
+		revision = "main"
+	}
+
+	// Fetch file tree - auto-detect model vs dataset if not explicitly a dataset
+	files, detectedIsDataset, err := a.fetchFileTreeAutoDetect(ctx, repo, isDataset, revision)
 	if err != nil {
 		return nil, fmt.Errorf("fetch file tree: %w", err)
 	}
+	isDataset = detectedIsDataset
 
 	// Build RepoInfo
 	info := &RepoInfo{
@@ -76,7 +88,7 @@ func (a *Analyzer) Analyze(ctx context.Context, repo string, isDataset bool) (*R
 		IsDataset:  isDataset,
 		Files:      files,
 		FileCount:  len(files),
-		Branch:     "main",
+		Branch:     revision,
 		AnalyzedAt: time.Now().UTC(),
 		Metadata:   make(map[string]interface{}),
 	}
@@ -90,6 +102,11 @@ func (a *Analyzer) Analyze(ctx context.Context, repo string, isDataset bool) (*R
 	// Detect type
 	info.Type = a.detectType(files, isDataset)
 	info.TypeDescription = info.Type.Description()
+
+	// Fetch refs (branches/tags) - non-fatal if fails
+	if refs, err := a.fetchRefs(ctx, repo, isDataset); err == nil {
+		info.Refs = refs
+	}
 
 	// Fetch and parse metadata files based on detected type
 	if err := a.fetchMetadata(ctx, repo, isDataset, info); err != nil {
@@ -113,6 +130,64 @@ type hfTreeNode struct {
 		SHA256 string `json:"sha256,omitempty"`
 		OID    string `json:"oid,omitempty"`
 	} `json:"lfs,omitempty"`
+}
+
+// ErrBothExist is returned when a repo exists as both model and dataset.
+var ErrBothExist = fmt.Errorf("repository exists as both model and dataset")
+
+// fetchFileTreeAutoDetect tries to fetch as model first, then as dataset if 404.
+// Returns the files, whether it's a dataset, and any error.
+// If both model and dataset exist, returns ErrBothExist.
+func (a *Analyzer) fetchFileTreeAutoDetect(ctx context.Context, repo string, isDataset bool, revision string) ([]FileInfo, bool, error) {
+	// If explicitly marked as dataset, fetch as dataset directly
+	if isDataset {
+		files, err := a.fetchFileTree(ctx, repo, true, revision)
+		return files, true, err
+	}
+
+	// Try as model first
+	modelFiles, modelErr := a.fetchFileTree(ctx, repo, false, revision)
+
+	// Helper to check if error indicates repo doesn't exist as model
+	// HuggingFace returns "not found" for missing repos, but also "unauthorized"
+	// when trying to access a datasets-only repo via the models API
+	isModelNotFound := func(err error) bool {
+		if err == nil {
+			return false
+		}
+		errStr := strings.ToLower(err.Error())
+		return strings.Contains(errStr, "not found") ||
+			strings.Contains(errStr, "unauthorized") ||
+			strings.Contains(errStr, "401")
+	}
+
+	// If model not found or unauthorized, try as dataset
+	if isModelNotFound(modelErr) {
+		datasetFiles, datasetErr := a.fetchFileTree(ctx, repo, true, revision)
+		if datasetErr == nil {
+			return datasetFiles, true, nil
+		}
+		// If dataset also fails with not found/unauthorized, return helpful error
+		if isModelNotFound(datasetErr) {
+			return nil, false, fmt.Errorf("repository not found as model or dataset: %s", repo)
+		}
+		// Dataset failed with different error (actual auth issue, network, etc.)
+		return nil, false, datasetErr
+	}
+
+	// If model found, check if dataset also exists
+	if modelErr == nil {
+		_, datasetErr := a.fetchFileTree(ctx, repo, true, revision)
+		if datasetErr == nil {
+			// Both exist - return error so caller can ask user
+			return nil, false, ErrBothExist
+		}
+		// Only model exists
+		return modelFiles, false, nil
+	}
+
+	// Return original error for other failures (network, etc.)
+	return nil, false, modelErr
 }
 
 // fetchFileTree recursively fetches the file tree from HuggingFace API.
@@ -224,6 +299,67 @@ func (a *Analyzer) rawURL(repo string, isDataset bool, revision, path string) st
 		return fmt.Sprintf("%s/datasets/%s/raw/%s/%s", a.endpoint, repo, url.PathEscape(revision), pathEscapeAll(path))
 	}
 	return fmt.Sprintf("%s/%s/raw/%s/%s", a.endpoint, repo, url.PathEscape(revision), pathEscapeAll(path))
+}
+
+// hfRefsResponse represents the HuggingFace refs API response.
+type hfRefsResponse struct {
+	Branches []hfRef `json:"branches"`
+	Tags     []hfRef `json:"tags"`
+}
+
+type hfRef struct {
+	Name      string `json:"name"`
+	Ref       string `json:"ref"`
+	TargetCommit string `json:"targetCommit"`
+}
+
+// fetchRefs fetches available branches and tags from the repository.
+func (a *Analyzer) fetchRefs(ctx context.Context, repo string, isDataset bool) ([]RepoRef, error) {
+	var apiPath string
+	if isDataset {
+		apiPath = fmt.Sprintf("%s/api/datasets/%s/refs", a.endpoint, repo)
+	} else {
+		apiPath = fmt.Sprintf("%s/api/models/%s/refs", a.endpoint, repo)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "GET", apiPath, nil)
+	if err != nil {
+		return nil, err
+	}
+	a.addAuth(req)
+
+	resp, err := a.client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		return nil, fmt.Errorf("fetch refs: %s", resp.Status)
+	}
+
+	var refsResp hfRefsResponse
+	if err := json.NewDecoder(resp.Body).Decode(&refsResp); err != nil {
+		return nil, fmt.Errorf("decode refs: %w", err)
+	}
+
+	var refs []RepoRef
+	for _, b := range refsResp.Branches {
+		refs = append(refs, RepoRef{
+			Name:   b.Name,
+			Type:   "branch",
+			Commit: b.TargetCommit,
+		})
+	}
+	for _, t := range refsResp.Tags {
+		refs = append(refs, RepoRef{
+			Name:   t.Name,
+			Type:   "tag",
+			Commit: t.TargetCommit,
+		})
+	}
+
+	return refs, nil
 }
 
 // addAuth adds authentication headers to a request.
@@ -353,7 +489,7 @@ func (a *Analyzer) fetchMetadata(ctx context.Context, repo string, isDataset boo
 			continue
 		}
 
-		content, err := a.fetchFile(ctx, repo, isDataset, "main", path)
+		content, err := a.fetchFile(ctx, repo, isDataset, info.Branch, path)
 		if err != nil {
 			continue // Non-fatal
 		}
