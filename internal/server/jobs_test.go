@@ -4,12 +4,18 @@
 package server
 
 import (
+	"os"
 	"testing"
 	"time"
 )
 
 func TestJobManager_CreateJob(t *testing.T) {
 	testCacheDir := t.TempDir()
+	// Cleanup any created directories before test ends
+	t.Cleanup(func() {
+		os.RemoveAll(testCacheDir)
+	})
+
 	cfg := Config{
 		CacheDir:    testCacheDir,
 		Concurrency: 2,
@@ -74,8 +80,14 @@ func TestJobManager_CreateJob(t *testing.T) {
 }
 
 func TestJobManager_Deduplication(t *testing.T) {
+	cacheDir := t.TempDir()
+	t.Cleanup(func() {
+		time.Sleep(100 * time.Millisecond)
+		os.RemoveAll(cacheDir)
+	})
+
 	cfg := Config{
-		CacheDir: t.TempDir(),
+		CacheDir: cacheDir,
 	}
 	hub := NewWSHub()
 	go hub.Run()
@@ -104,8 +116,14 @@ func TestJobManager_Deduplication(t *testing.T) {
 }
 
 func TestJobManager_DifferentRevisionsNotDeduplicated(t *testing.T) {
+	cacheDir := t.TempDir()
+	t.Cleanup(func() {
+		time.Sleep(100 * time.Millisecond)
+		os.RemoveAll(cacheDir)
+	})
+
 	cfg := Config{
-		CacheDir: t.TempDir(),
+		CacheDir: cacheDir,
 	}
 	hub := NewWSHub()
 	go hub.Run()
@@ -131,8 +149,14 @@ func TestJobManager_DifferentRevisionsNotDeduplicated(t *testing.T) {
 }
 
 func TestJobManager_ModelVsDatasetNotDeduplicated(t *testing.T) {
+	cacheDir := t.TempDir()
+	t.Cleanup(func() {
+		time.Sleep(100 * time.Millisecond) // Let goroutines finish
+		os.RemoveAll(cacheDir)
+	})
+
 	cfg := Config{
-		CacheDir: t.TempDir(),
+		CacheDir: cacheDir,
 	}
 	hub := NewWSHub()
 	go hub.Run()
@@ -158,7 +182,13 @@ func TestJobManager_ModelVsDatasetNotDeduplicated(t *testing.T) {
 }
 
 func TestJobManager_GetJob(t *testing.T) {
-	cfg := Config{CacheDir: t.TempDir()}
+	cacheDir := t.TempDir()
+	t.Cleanup(func() {
+		time.Sleep(100 * time.Millisecond)
+		os.RemoveAll(cacheDir)
+	})
+
+	cfg := Config{CacheDir: cacheDir}
 	hub := NewWSHub()
 	go hub.Run()
 	mgr := NewJobManager(cfg, hub)
@@ -184,7 +214,13 @@ func TestJobManager_GetJob(t *testing.T) {
 }
 
 func TestJobManager_ListJobs(t *testing.T) {
-	cfg := Config{CacheDir: t.TempDir()}
+	cacheDir := t.TempDir()
+	t.Cleanup(func() {
+		time.Sleep(100 * time.Millisecond) // Let goroutines finish
+		os.RemoveAll(cacheDir)
+	})
+
+	cfg := Config{CacheDir: cacheDir}
 	hub := NewWSHub()
 	go hub.Run()
 	mgr := NewJobManager(cfg, hub)
@@ -201,7 +237,13 @@ func TestJobManager_ListJobs(t *testing.T) {
 }
 
 func TestJobManager_CancelJob(t *testing.T) {
-	cfg := Config{CacheDir: t.TempDir()}
+	cacheDir := t.TempDir()
+	t.Cleanup(func() {
+		time.Sleep(100 * time.Millisecond)
+		os.RemoveAll(cacheDir)
+	})
+
+	cfg := Config{CacheDir: cacheDir}
 	hub := NewWSHub()
 	go hub.Run()
 	mgr := NewJobManager(cfg, hub)
