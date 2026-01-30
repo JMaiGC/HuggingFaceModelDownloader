@@ -7,10 +7,34 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 )
+
+// Windows symlink warning - only show once per session
+var (
+	windowsSymlinkWarned bool
+	windowsSymlinkMu     sync.Mutex
+)
+
+// isWindows returns true if running on Windows
+func isWindows() bool {
+	return runtime.GOOS == "windows"
+}
+
+// warnWindowsSymlink logs a warning about symlinks on Windows (once per session)
+func warnWindowsSymlink() {
+	windowsSymlinkMu.Lock()
+	defer windowsSymlinkMu.Unlock()
+	if !windowsSymlinkWarned {
+		fmt.Fprintln(os.Stderr, "[WARN] Symlinks not supported on Windows without admin/Developer Mode. Friendly view will not be created.")
+		fmt.Fprintln(os.Stderr, "[WARN] Downloads will still work - files are stored in the HuggingFace cache.")
+		windowsSymlinkWarned = true
+	}
+}
 
 // RepoType indicates whether a repository is a model or dataset.
 type RepoType string
@@ -416,7 +440,14 @@ func (r *RepoDir) CreateSnapshot(commit string, files []SnapshotFile) error {
 
 // createSnapshotSymlink creates a single symlink from snapshot to blob.
 // Uses relative symlinks: snapshots/{commit}/{path} -> ../../blobs/{sha256}
+// On Windows, this is skipped gracefully since symlinks require admin privileges.
 func (r *RepoDir) createSnapshotSymlink(commit, relativePath, sha256 string) error {
+	// Skip symlinks on Windows - they require admin/Developer Mode
+	if isWindows() {
+		warnWindowsSymlink()
+		return nil
+	}
+
 	snapshotDir := r.SnapshotDir(commit)
 	linkPath := filepath.Join(snapshotDir, relativePath)
 
@@ -477,7 +508,14 @@ func (r *RepoDir) ListSnapshots() ([]string, error) {
 // CreateFriendlySymlink creates a symlink in the friendly view pointing to a snapshot file.
 // Uses relative symlinks for portability.
 // filterSubdir is optional - if provided, creates symlink in a subdirectory (e.g., "q4_k_m")
+// On Windows, this is skipped gracefully since symlinks require admin privileges.
 func (r *RepoDir) CreateFriendlySymlink(commit, relativePath, filterSubdir string) error {
+	// Skip symlinks on Windows - they require admin/Developer Mode
+	if isWindows() {
+		warnWindowsSymlink()
+		return nil
+	}
+
 	friendlyBase := r.FriendlyPath()
 
 	// Determine the link path

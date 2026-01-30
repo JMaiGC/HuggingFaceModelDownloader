@@ -224,6 +224,8 @@ We maintain **two views** of your downloads:
 
 **Layer 2 (models/)**: Human-readable paths with symlinks. Browse your downloads like normal folders.
 
+> **Windows Note**: The friendly view (Layer 2) requires symlinks, which need Administrator privileges or Developer Mode on Windows. Downloads still work — files are stored in the HuggingFace cache (Layer 1) — but the human-readable symlinks won't be created.
+
 ### Manifest Tracking
 
 Every download creates `hfd.yaml` so you know exactly what you have:
