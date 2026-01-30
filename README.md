@@ -9,7 +9,7 @@
 [![Release](https://img.shields.io/github/v/release/bodaay/HuggingFaceModelDownloader?color=green)](https://github.com/bodaay/HuggingFaceModelDownloader/releases)
 [![Downloads](https://img.shields.io/github/downloads/bodaay/HuggingFaceModelDownloader/total?color=purple)](https://github.com/bodaay/HuggingFaceModelDownloader/releases)
 
-**10-20x faster downloads** • **Smart GGUF analyzer** • **Python compatible** • **Full proxy support**
+**Parallel downloads** • **Smart GGUF analyzer** • **Python compatible** • **Full proxy support**
 
 [Quick Start](#quick-start) •
 [Why This Tool](#why-this-tool) •
@@ -24,9 +24,13 @@
 
 ## Why This Tool?
 
-### 10-20x Faster Downloads
+### Parallel Downloads
 
-While `huggingface-cli` downloads with a single connection, we use **up to 16 parallel connections per file** and download **multiple files simultaneously**.
+Maximize your bandwidth with **multiple connections per file** and **concurrent file downloads**:
+
+- Up to 16 parallel connections per file (chunked download)
+- Up to 8 files downloading simultaneously
+- Automatic resume on interruption
 
 ![CLI Download Progress](docs/screenshots/cli-tui.png)
 
