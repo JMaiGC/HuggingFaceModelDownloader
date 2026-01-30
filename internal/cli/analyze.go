@@ -12,15 +12,18 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/bodaay/HuggingFaceModelDownloader/internal/tui"
 	"github.com/bodaay/HuggingFaceModelDownloader/pkg/hfdownloader"
 	"github.com/bodaay/HuggingFaceModelDownloader/pkg/smartdl"
 )
 
 func newAnalyzeCmd(ctx context.Context, ro *RootOpts) *cobra.Command {
 	var (
-		isDataset bool
-		endpoint  string
-		formatOut string
+		isDataset   bool
+		endpoint    string
+		formatOut   string
+		revision    string
+		interactive bool
 	)
 
 	cmd := &cobra.Command{
@@ -34,10 +37,16 @@ any files, then presents intelligent analysis based on the detected type.
 
 Examples:
   # Analyze a GGUF model
-  hfdownloader analyze TheBloke/Mistral-7B-GGUF
+  hfdownloader analyze TheBloke/Mistral-7B-Instruct-v0.2-GGUF
+
+  # Interactive mode - select files with TUI
+  hfdownloader analyze TheBloke/Mistral-7B-Instruct-v0.2-GGUF -i
 
   # Analyze a diffusers model
   hfdownloader analyze stabilityai/stable-diffusion-xl-base-1.0
+
+  # Analyze a specific branch
+  hfdownloader analyze TheBloke/Llama-2-7B-Chat-GPTQ -b gptq-4bit-32g-actorder_True
 
   # Analyze a dataset
   hfdownloader analyze --dataset HuggingFaceFW/fineweb
@@ -66,8 +75,8 @@ Examples:
 			}
 			analyzer := smartdl.NewAnalyzer(opts)
 
-			// Analyze
-			info, err := analyzer.Analyze(ctx, repo, isDataset)
+			// Analyze with revision
+			info, err := analyzer.AnalyzeWithRevision(ctx, repo, isDataset, revision)
 			if err != nil {
 				return fmt.Errorf("analysis failed: %w", err)
 			}
@@ -79,6 +88,34 @@ Examples:
 				return enc.Encode(info)
 			}
 
+			// Interactive mode - launch TUI selector
+			if interactive {
+				// Check if there are multiple refs and user didn't specify a revision
+				if len(info.Refs) > 1 && revision == "main" {
+					// Show branch picker
+					branchResult, err := tui.RunBranchPicker(repo, info.Refs)
+					if err != nil {
+						return fmt.Errorf("branch picker failed: %w", err)
+					}
+
+					if branchResult.Cancelled {
+						fmt.Println("Cancelled.")
+						return nil
+					}
+
+					// If user selected a different branch, re-analyze
+					if branchResult.Selected != "" && branchResult.Selected != info.Branch {
+						fmt.Printf("Analyzing %s (%s)...\n", repo, branchResult.Selected)
+						info, err = analyzer.AnalyzeWithRevision(ctx, repo, isDataset, branchResult.Selected)
+						if err != nil {
+							return fmt.Errorf("analysis failed: %w", err)
+						}
+					}
+				}
+
+				return runInteractiveSelector(ctx, info, ro)
+			}
+
 			// Human-readable output
 			printAnalysis(info)
 			return nil
@@ -88,12 +125,90 @@ Examples:
 	cmd.Flags().BoolVar(&isDataset, "dataset", false, "Analyze as a dataset repository")
 	cmd.Flags().StringVar(&endpoint, "endpoint", "", "Custom HuggingFace endpoint URL (e.g. https://hf-mirror.com)")
 	cmd.Flags().StringVar(&formatOut, "format", "text", "Output format: text, json")
+	cmd.Flags().StringVarP(&revision, "revision", "b", "main", "Branch or revision to analyze (e.g. main, gptq-4bit-32g-actorder_True)")
+	cmd.Flags().BoolVarP(&interactive, "interactive", "i", false, "Launch interactive TUI for selecting files to download")
 
 	return cmd
 }
 
+// runInteractiveSelector launches the TUI selector and handles the result.
+func runInteractiveSelector(ctx context.Context, info *smartdl.RepoInfo, ro *RootOpts) error {
+	// Check if there are selectable items
+	if len(info.SelectableItems) == 0 {
+		fmt.Println("No selectable items found for this repository.")
+		fmt.Println("Falling back to standard output...")
+		fmt.Println()
+		printAnalysis(info)
+		return nil
+	}
+
+	// Run the TUI selector
+	result, err := tui.RunSelector(info)
+	if err != nil {
+		return fmt.Errorf("selector failed: %w", err)
+	}
+
+	// Handle the result
+	switch result.Action {
+	case "download":
+		if len(result.SelectedFilters) == 0 {
+			fmt.Println("\nNo items selected. Aborting download.")
+			return nil
+		}
+
+		fmt.Printf("\nStarting download with filters: %v\n", result.SelectedFilters)
+		fmt.Printf("Command: %s\n\n", result.CLICommand)
+
+		// Build job and settings for download
+		job := hfdownloader.Job{
+			Repo:      info.Repo,
+			IsDataset: info.IsDataset,
+			Revision:  info.Branch,
+			Filters:   result.SelectedFilters,
+		}
+		if job.Revision == "" {
+			job.Revision = "main"
+		}
+
+		// Get token
+		token := strings.TrimSpace(ro.Token)
+		if token == "" {
+			token = strings.TrimSpace(os.Getenv("HF_TOKEN"))
+		}
+
+		cfg := hfdownloader.Settings{
+			Token:              token,
+			Concurrency:        8,
+			MaxActiveDownloads: 3,
+			MultipartThreshold: "32MiB",
+			Verify:             "size",
+			Retries:            4,
+			BackoffInitial:     "400ms",
+			BackoffMax:         "10s",
+		}
+
+		// Use live TUI for download progress
+		ui := tui.NewLiveRenderer(job, cfg)
+		defer ui.Close()
+		progress := ui.Handler()
+
+		return hfdownloader.Download(ctx, job, cfg, progress)
+
+	case "copy":
+		fmt.Printf("\nCommand copied to clipboard:\n  %s\n", result.CLICommand)
+
+	case "cancel":
+		fmt.Println("\nCancelled.")
+	}
+
+	return nil
+}
+
 func printAnalysis(info *smartdl.RepoInfo) {
 	fmt.Printf("Repository: %s\n", info.Repo)
+	if info.Branch != "" && info.Branch != "main" {
+		fmt.Printf("Branch:     %s\n", info.Branch)
+	}
 	fmt.Printf("Type:       %s (%s)\n", info.Type, info.TypeDescription)
 	fmt.Printf("Files:      %d\n", info.FileCount)
 	fmt.Printf("Total Size: %s\n", info.TotalSizeHuman)
@@ -123,6 +238,160 @@ func printAnalysis(info *smartdl.RepoInfo) {
 	default:
 		printGenericAnalysis(info)
 	}
+
+	// Print selectable items (unified across all types)
+	printSelectableItems(info)
+
+	// Print related downloads (e.g., base model for LoRA)
+	printRelatedDownloads(info)
+
+	// Print CLI commands at the end
+	printCLICommands(info)
+}
+
+// printSelectableItems displays available download options
+func printSelectableItems(info *smartdl.RepoInfo) {
+	if len(info.SelectableItems) == 0 {
+		return
+	}
+
+	// Group items by category
+	categories := make(map[string][]smartdl.SelectableItem)
+	for _, item := range info.SelectableItems {
+		cat := item.Category
+		if cat == "" {
+			cat = "options"
+		}
+		categories[cat] = append(categories[cat], item)
+	}
+
+	categoryTitles := map[string]string{
+		"quantization": "Available Quantizations",
+		"variant":      "Available Variants",
+		"component":    "Available Components",
+		"split":        "Available Splits",
+		"format":       "Weight Formats",
+		"precision":    "Precision Options",
+		"options":      "Available Options",
+	}
+
+	for cat, items := range categories {
+		title := categoryTitles[cat]
+		if title == "" {
+			title = "Available " + strings.Title(cat)
+		}
+
+		fmt.Println()
+		fmt.Printf("%s:\n", title)
+
+		// Determine columns based on category
+		switch cat {
+		case "quantization":
+			fmt.Printf("  %-12s  %12s  %12s  %s  %s\n", "OPTION", "SIZE", "RAM", "QUALITY", "FILTER")
+			fmt.Printf("  %-12s  %12s  %12s  %s  %s\n", "------------", "------------", "------------", "-------", "------")
+			for _, item := range items {
+				stars := ""
+				if item.Quality > 0 {
+					stars = strings.Repeat("★", item.Quality) + strings.Repeat("☆", 5-item.Quality)
+				}
+				rec := ""
+				if item.Recommended {
+					rec = " *"
+				}
+				fmt.Printf("  %-12s  %12s  %12s  %s  -F %s%s\n",
+					item.Label,
+					item.SizeHuman,
+					item.RAMHuman,
+					stars,
+					item.FilterValue,
+					rec,
+				)
+			}
+		case "component", "split":
+			fmt.Printf("  %-20s  %12s  %10s  %s\n", "OPTION", "SIZE", "REC", "FILTER")
+			fmt.Printf("  %-20s  %12s  %10s  %s\n", "--------------------", "------------", "----------", "------")
+			for _, item := range items {
+				rec := ""
+				if item.Recommended {
+					rec = "yes"
+				}
+				fmt.Printf("  %-20s  %12s  %10s  -F %s\n",
+					item.Label,
+					item.SizeHuman,
+					rec,
+					item.FilterValue,
+				)
+			}
+		default:
+			fmt.Printf("  %-15s  %12s  %10s  %s\n", "OPTION", "SIZE", "REC", "FILTER")
+			fmt.Printf("  %-15s  %12s  %10s  %s\n", "---------------", "------------", "----------", "------")
+			for _, item := range items {
+				rec := ""
+				if item.Recommended {
+					rec = "yes"
+				}
+				sizeStr := item.SizeHuman
+				if sizeStr == "" {
+					sizeStr = "-"
+				}
+				fmt.Printf("  %-15s  %12s  %10s  -F %s\n",
+					item.Label,
+					sizeStr,
+					rec,
+					item.FilterValue,
+				)
+			}
+		}
+	}
+
+	// Note about recommended items
+	hasRecommended := false
+	for _, item := range info.SelectableItems {
+		if item.Recommended {
+			hasRecommended = true
+			break
+		}
+	}
+	if hasRecommended {
+		fmt.Println()
+		fmt.Println("  * = recommended")
+	}
+}
+
+// printRelatedDownloads displays related downloads like base model for LoRA
+func printRelatedDownloads(info *smartdl.RepoInfo) {
+	if len(info.RelatedDownloads) == 0 {
+		return
+	}
+
+	fmt.Println()
+	fmt.Println("Related Downloads:")
+	for _, dl := range info.RelatedDownloads {
+		required := ""
+		if dl.Required {
+			required = " (required)"
+		}
+		fmt.Printf("  %s%s\n", dl.Label, required)
+		fmt.Printf("    Repo: %s\n", dl.Repo)
+		if dl.Description != "" {
+			fmt.Printf("    %s\n", dl.Description)
+		}
+		if dl.SizeHuman != "" {
+			fmt.Printf("    Size: %s\n", dl.SizeHuman)
+		}
+	}
+}
+
+// printCLICommands displays the generated CLI commands
+func printCLICommands(info *smartdl.RepoInfo) {
+	fmt.Println()
+	fmt.Println("Download Commands:")
+	if info.CLICommand != "" {
+		fmt.Printf("  Full:        %s\n", info.CLICommand)
+	}
+	if info.CLICommandFull != "" && info.CLICommandFull != info.CLICommand {
+		fmt.Printf("  Recommended: %s\n", info.CLICommandFull)
+	}
 }
 
 func printGGUFAnalysis(info *smartdl.RepoInfo) {
@@ -137,27 +406,7 @@ func printGGUFAnalysis(info *smartdl.RepoInfo) {
 	if gguf.ParameterCount != "" {
 		fmt.Printf("Parameters: %s\n", gguf.ParameterCount)
 	}
-	fmt.Println()
-
-	fmt.Println("Available Quantizations:")
-	fmt.Printf("  %-12s  %12s  %12s  %s  %s\n", "QUANT", "SIZE", "RAM", "QUALITY", "DESCRIPTION")
-	fmt.Printf("  %-12s  %12s  %12s  %s  %s\n", "------------", "------------", "------------", "-------", "-----------")
-
-	for _, q := range gguf.Quantizations {
-		stars := strings.Repeat("★", q.Quality) + strings.Repeat("☆", 5-q.Quality)
-		ramHuman := humanSize(q.EstimatedRAM)
-		fmt.Printf("  %-12s  %12s  %12s  %s  %s\n",
-			q.Name,
-			q.File.SizeHuman,
-			ramHuman,
-			stars,
-			q.Description,
-		)
-	}
-
-	fmt.Println()
-	fmt.Println("Usage:")
-	fmt.Printf("  hfdownloader download %s -F <quant>  # e.g., -F q4_k_m\n", info.Repo)
+	// Quantizations are displayed through unified SelectableItems section
 }
 
 func printTransformersAnalysis(info *smartdl.RepoInfo) {
@@ -255,11 +504,8 @@ func printTransformersAnalysis(info *smartdl.RepoInfo) {
 	// Compatible backends
 	if len(t.Backends) > 0 {
 		fmt.Printf("Backends:     %s\n", strings.Join(t.Backends, ", "))
-		fmt.Println()
 	}
-
-	fmt.Println("Usage:")
-	fmt.Printf("  hfdownloader download %s\n", info.Repo)
+	// Download commands are displayed through unified CLI commands section
 }
 
 func printDiffusersAnalysis(info *smartdl.RepoInfo) {
@@ -294,10 +540,7 @@ func printDiffusersAnalysis(info *smartdl.RepoInfo) {
 		fmt.Printf("  %-20s  %12s  %10s  %s\n", c.Name, c.SizeHuman, required, c.ClassName)
 	}
 
-	fmt.Println()
-	fmt.Println("Usage:")
-	fmt.Printf("  hfdownloader download %s                    # Download all\n", info.Repo)
-	fmt.Printf("  hfdownloader download %s -F fp16           # Download fp16 variant\n", info.Repo)
+	// Download commands are displayed through unified CLI commands section
 }
 
 func printLoRAAnalysis(info *smartdl.RepoInfo) {
@@ -328,12 +571,7 @@ func printLoRAAnalysis(info *smartdl.RepoInfo) {
 		fmt.Printf("Targets:    %s\n", strings.Join(lora.TargetModules, ", "))
 	}
 
-	fmt.Println()
-	fmt.Println("Usage:")
-	fmt.Printf("  hfdownloader download %s\n", info.Repo)
-	if lora.BaseModel != "" {
-		fmt.Printf("  hfdownloader download %s  # Base model\n", lora.BaseModel)
-	}
+	// Download commands are displayed through unified CLI commands section
 }
 
 func printQuantizedAnalysis(info *smartdl.RepoInfo) {
@@ -364,10 +602,7 @@ func printQuantizedAnalysis(info *smartdl.RepoInfo) {
 	if q.DescAct {
 		fmt.Println("Note:       desc_act=True (may be slower but more accurate)")
 	}
-
-	fmt.Println()
-	fmt.Println("Usage:")
-	fmt.Printf("  hfdownloader download %s\n", info.Repo)
+	// Download commands are displayed through unified CLI commands section
 }
 
 func printDatasetAnalysis(info *smartdl.RepoInfo) {
@@ -394,11 +629,7 @@ func printDatasetAnalysis(info *smartdl.RepoInfo) {
 	for _, s := range ds.Splits {
 		fmt.Printf("  %-20s  %10d  %12s\n", s.Name, s.FileCount, s.SizeHuman)
 	}
-
-	fmt.Println()
-	fmt.Println("Usage:")
-	fmt.Printf("  hfdownloader download --dataset %s             # Download all\n", info.Repo)
-	fmt.Printf("  hfdownloader download --dataset %s -F train   # Download train split only\n", info.Repo)
+	// Download commands are displayed through unified CLI commands section
 }
 
 func printGenericAnalysis(info *smartdl.RepoInfo) {
@@ -423,14 +654,7 @@ func printGenericAnalysis(info *smartdl.RepoInfo) {
 		}
 		fmt.Printf("  %-50s  %12s  %s\n", name, f.SizeHuman, lfs)
 	}
-
-	fmt.Println()
-	fmt.Println("Usage:")
-	if info.IsDataset {
-		fmt.Printf("  hfdownloader download --dataset %s\n", info.Repo)
-	} else {
-		fmt.Printf("  hfdownloader download %s\n", info.Repo)
-	}
+	// Download commands are displayed through unified CLI commands section
 }
 
 func printAudioAnalysis(info *smartdl.RepoInfo) {
@@ -461,10 +685,7 @@ func printAudioAnalysis(info *smartdl.RepoInfo) {
 	if audio.Framework != "" {
 		fmt.Printf("Framework:         %s\n", audio.Framework)
 	}
-
-	fmt.Println()
-	fmt.Println("Usage:")
-	fmt.Printf("  hfdownloader download %s\n", info.Repo)
+	// Download commands are displayed through unified CLI commands section
 }
 
 func printVisionAnalysis(info *smartdl.RepoInfo) {
@@ -498,10 +719,7 @@ func printVisionAnalysis(info *smartdl.RepoInfo) {
 	if vision.Framework != "" {
 		fmt.Printf("Framework:       %s\n", vision.Framework)
 	}
-
-	fmt.Println()
-	fmt.Println("Usage:")
-	fmt.Printf("  hfdownloader download %s\n", info.Repo)
+	// Download commands are displayed through unified CLI commands section
 }
 
 func printMultimodalAnalysis(info *smartdl.RepoInfo) {
@@ -538,10 +756,7 @@ func printMultimodalAnalysis(info *smartdl.RepoInfo) {
 	if mm.Framework != "" {
 		fmt.Printf("Framework:     %s\n", mm.Framework)
 	}
-
-	fmt.Println()
-	fmt.Println("Usage:")
-	fmt.Printf("  hfdownloader download %s\n", info.Repo)
+	// Download commands are displayed through unified CLI commands section
 }
 
 func printONNXAnalysis(info *smartdl.RepoInfo) {
@@ -577,9 +792,5 @@ func printONNXAnalysis(info *smartdl.RepoInfo) {
 		}
 		fmt.Printf("  %-40s  %12s  %s\n", name, m.SizeHuman, variant)
 	}
-
-	fmt.Println()
-	fmt.Println("Usage:")
-	fmt.Printf("  hfdownloader download %s             # Download all\n", info.Repo)
-	fmt.Printf("  hfdownloader download %s -F fp16    # Download fp16 variant only\n", info.Repo)
+	// Download commands are displayed through unified CLI commands section
 }

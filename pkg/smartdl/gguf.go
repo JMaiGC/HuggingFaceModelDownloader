@@ -211,3 +211,52 @@ func RecommendGGUF(info *GGUFInfo, availableRAM int64) []GGUFQuantization {
 
 	return recommended
 }
+
+// GGUFToSelectableItems converts GGUF quantizations to SelectableItems.
+// This provides a unified interface for the web UI and CLI.
+func GGUFToSelectableItems(info *GGUFInfo) []SelectableItem {
+	if info == nil || len(info.Quantizations) == 0 {
+		return nil
+	}
+
+	items := make([]SelectableItem, 0, len(info.Quantizations))
+
+	// Track if we have a Q4_K_M (common recommended default)
+	hasQ4KM := false
+	for _, q := range info.Quantizations {
+		if q.Name == "Q4_K_M" {
+			hasQ4KM = true
+			break
+		}
+	}
+
+	for _, q := range info.Quantizations {
+		// Determine if this should be recommended
+		// Q4_K_M is a good default, otherwise highest quality in 4-bit range
+		recommended := false
+		if hasQ4KM && q.Name == "Q4_K_M" {
+			recommended = true
+		} else if !hasQ4KM && q.Quality >= 4 && q.File.Size < 10*1024*1024*1024 { // < 10 GiB
+			recommended = true
+		}
+
+		item := SelectableItem{
+			ID:           strings.ToLower(q.Name),
+			Label:        q.Name,
+			Description:  q.Description,
+			Size:         q.File.Size,
+			SizeHuman:    q.File.SizeHuman,
+			Quality:      q.Quality,
+			QualityStars: q.QualityStars,
+			Recommended:  recommended,
+			Category:     "quantization",
+			FilterValue:  strings.ToLower(q.Name),
+			Files:        []string{q.File.Path},
+			RAM:          q.EstimatedRAM,
+			RAMHuman:     q.EstimatedRAMHuman,
+		}
+		items = append(items, item)
+	}
+
+	return items
+}

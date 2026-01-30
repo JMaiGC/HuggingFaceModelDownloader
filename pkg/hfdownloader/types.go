@@ -195,6 +195,16 @@ type Settings struct {
 	// The token is automatically stripped from the command for security.
 	// Used internally by the CLI; library users typically don't set this.
 	Command string
+
+	// Proxy configures HTTP/HTTPS/SOCKS5 proxy settings for downloads.
+	// If nil or empty, falls back to environment variables (HTTP_PROXY, etc).
+	//
+	// Example configurations:
+	//   - HTTP proxy: &ProxyConfig{URL: "http://proxy:8080"}
+	//   - SOCKS5 proxy: &ProxyConfig{URL: "socks5://proxy:1080"}
+	//   - With auth: &ProxyConfig{URL: "http://proxy:8080", Username: "user", Password: "pass"}
+	//   - Disable env proxy: &ProxyConfig{NoEnvProxy: true}
+	Proxy *ProxyConfig
 }
 
 // ProgressEvent represents a progress update during download.

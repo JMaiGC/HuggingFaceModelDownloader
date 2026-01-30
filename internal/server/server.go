@@ -176,6 +176,18 @@ func (s *Server) registerAPIRoutes(mux *http.ServeMux) {
 	// Cache browser
 	mux.HandleFunc("GET /api/cache", s.handleCacheList)
 	mux.HandleFunc("GET /api/cache/{repo...}", s.handleCacheInfo)
+	mux.HandleFunc("POST /api/cache/rebuild", s.handleCacheRebuild)
+	mux.HandleFunc("DELETE /api/cache/{repo...}", s.handleCacheDelete)
+
+	// Mirror - Target management
+	mux.HandleFunc("GET /api/mirror/targets", s.handleMirrorTargetsList)
+	mux.HandleFunc("POST /api/mirror/targets", s.handleMirrorTargetAdd)
+	mux.HandleFunc("DELETE /api/mirror/targets/{name}", s.handleMirrorTargetRemove)
+
+	// Mirror - Operations
+	mux.HandleFunc("POST /api/mirror/diff", s.handleMirrorDiff)
+	mux.HandleFunc("POST /api/mirror/push", s.handleMirrorPush)
+	mux.HandleFunc("POST /api/mirror/pull", s.handleMirrorPull)
 
 	// WebSocket
 	mux.HandleFunc("GET /api/ws", s.handleWebSocket)

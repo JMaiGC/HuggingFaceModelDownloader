@@ -455,3 +455,110 @@ func describeArchitecture(arch string) string {
 
 	return "Transformer model"
 }
+
+// TransformersToSelectableItems converts Transformers weight files to SelectableItems.
+func TransformersToSelectableItems(info *TransformersInfo, files []FileInfo) []SelectableItem {
+	if info == nil {
+		return nil
+	}
+
+	var items []SelectableItem
+
+	// Group files by format
+	hasSafetensors := false
+	hasPytorchBin := false
+	var safetensorsSize, pytorchBinSize int64
+
+	for _, wf := range info.WeightFiles {
+		if wf.Format == "safetensors" {
+			hasSafetensors = true
+			safetensorsSize += wf.Size
+		} else if wf.Format == "pytorch_bin" {
+			hasPytorchBin = true
+			pytorchBinSize += wf.Size
+		}
+	}
+
+	// Add format options if both are available
+	if hasSafetensors && hasPytorchBin {
+		items = append(items, SelectableItem{
+			ID:           "safetensors",
+			Label:        "SafeTensors",
+			Description:  "Faster loading, recommended",
+			Size:         safetensorsSize,
+			SizeHuman:    humanSize(safetensorsSize),
+			Quality:      5,
+			QualityStars: "★★★★★",
+			Recommended:  true,
+			Category:     "format",
+			FilterValue:  "safetensors",
+		})
+
+		items = append(items, SelectableItem{
+			ID:           "pytorch",
+			Label:        "PyTorch (.bin)",
+			Description:  "Legacy format",
+			Size:         pytorchBinSize,
+			SizeHuman:    humanSize(pytorchBinSize),
+			Quality:      3,
+			QualityStars: "★★★☆☆",
+			Recommended:  false,
+			Category:     "format",
+			FilterValue:  ".bin",
+		})
+	}
+
+	// Detect precision variants by checking file paths
+	precisions := detectPrecisionVariants(files)
+	if len(precisions) > 1 {
+		precisionDescriptions := map[string]string{
+			"fp16": "Half precision - Recommended for inference",
+			"fp32": "Full precision - Training and maximum accuracy",
+			"bf16": "Brain float - Good for Ampere+ GPUs",
+		}
+
+		for _, prec := range precisions {
+			desc := precisionDescriptions[prec]
+			if desc == "" {
+				desc = "Precision variant"
+			}
+
+			item := SelectableItem{
+				ID:          prec,
+				Label:       strings.ToUpper(prec),
+				Description: desc,
+				Recommended: prec == "fp16",
+				Category:    "precision",
+				FilterValue: prec,
+			}
+			items = append(items, item)
+		}
+	}
+
+	return items
+}
+
+// detectPrecisionVariants finds available precision variants from files.
+func detectPrecisionVariants(files []FileInfo) []string {
+	variants := make(map[string]bool)
+
+	for _, f := range files {
+		lower := strings.ToLower(f.Path)
+		if strings.Contains(lower, "fp16") || strings.Contains(lower, "float16") {
+			variants["fp16"] = true
+		}
+		if strings.Contains(lower, "fp32") || strings.Contains(lower, "float32") {
+			variants["fp32"] = true
+		}
+		if strings.Contains(lower, "bf16") || strings.Contains(lower, "bfloat16") {
+			variants["bf16"] = true
+		}
+	}
+
+	var result []string
+	for v := range variants {
+		result = append(result, v)
+	}
+	sort.Strings(result)
+	return result
+}

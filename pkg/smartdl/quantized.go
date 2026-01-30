@@ -3,6 +3,8 @@
 
 package smartdl
 
+import "strings"
+
 // Quantization method descriptions.
 var quantMethodDescriptions = map[string]string{
 	"gptq":        "GPTQ - GPU-accelerated post-training quantization",
@@ -171,4 +173,61 @@ func SupportsBackend(info *QuantizedInfo, backend string) bool {
 		}
 	}
 	return false
+}
+
+// QuantizedToSelectableItems converts quantized model info to SelectableItems.
+// For GPTQ/AWQ, there's typically only one version, so this shows informational items.
+func QuantizedToSelectableItems(info *QuantizedInfo, files []FileInfo) []SelectableItem {
+	if info == nil {
+		return nil
+	}
+
+	var items []SelectableItem
+
+	// Check for safetensors vs bin files
+	hasSafetensors := false
+	hasPytorchBin := false
+	var safetensorsSize, pytorchBinSize int64
+
+	for _, f := range files {
+		lower := strings.ToLower(f.Name)
+		if strings.HasSuffix(lower, ".safetensors") {
+			hasSafetensors = true
+			safetensorsSize += f.Size
+		} else if strings.HasSuffix(lower, ".bin") && !strings.Contains(lower, "tokenizer") {
+			hasPytorchBin = true
+			pytorchBinSize += f.Size
+		}
+	}
+
+	// Add format options if both are available
+	if hasSafetensors && hasPytorchBin {
+		items = append(items, SelectableItem{
+			ID:           "safetensors",
+			Label:        "SafeTensors",
+			Description:  "Faster loading, recommended",
+			Size:         safetensorsSize,
+			SizeHuman:    humanSize(safetensorsSize),
+			Quality:      5,
+			QualityStars: "★★★★★",
+			Recommended:  true,
+			Category:     "format",
+			FilterValue:  "safetensors",
+		})
+
+		items = append(items, SelectableItem{
+			ID:           "pytorch",
+			Label:        "PyTorch (.bin)",
+			Description:  "Legacy format",
+			Size:         pytorchBinSize,
+			SizeHuman:    humanSize(pytorchBinSize),
+			Quality:      3,
+			QualityStars: "★★★☆☆",
+			Recommended:  false,
+			Category:     "format",
+			FilterValue:  ".bin",
+		})
+	}
+
+	return items
 }

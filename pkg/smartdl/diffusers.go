@@ -230,3 +230,58 @@ func CalculateDownloadSize(info *DiffusersInfo, files []FileInfo, selectedCompon
 
 	return total
 }
+
+// DiffusersToSelectableItems converts Diffusers components and variants to SelectableItems.
+func DiffusersToSelectableItems(info *DiffusersInfo) []SelectableItem {
+	if info == nil {
+		return nil
+	}
+
+	var items []SelectableItem
+
+	// Add variants if available (fp16, fp32, bf16)
+	variantDescriptions := map[string]string{
+		"fp16": "Half precision - Recommended, uses less VRAM",
+		"fp32": "Full precision - Maximum quality, more VRAM",
+		"bf16": "Brain float - Good quality, efficient on modern GPUs",
+	}
+
+	for _, variant := range info.Variants {
+		desc := variantDescriptions[variant]
+		if desc == "" {
+			desc = "Model variant"
+		}
+
+		item := SelectableItem{
+			ID:          variant,
+			Label:       strings.ToUpper(variant),
+			Description: desc,
+			Recommended: variant == "fp16",
+			Category:    "variant",
+			FilterValue: variant,
+		}
+		items = append(items, item)
+	}
+
+	// Add components
+	for _, comp := range info.Components {
+		desc := comp.ClassName
+		if desc == "" {
+			desc = comp.Library + " component"
+		}
+
+		item := SelectableItem{
+			ID:          comp.Name,
+			Label:       comp.Name,
+			Description: desc,
+			Size:        comp.Size,
+			SizeHuman:   comp.SizeHuman,
+			Recommended: comp.Required,
+			Category:    "component",
+			FilterValue: comp.Name,
+		}
+		items = append(items, item)
+	}
+
+	return items
+}

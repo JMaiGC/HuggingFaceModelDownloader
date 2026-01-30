@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -122,7 +123,7 @@ func Download(ctx context.Context, job Job, cfg Settings, progress ProgressFunc)
 		return fmt.Errorf("invalid multipart-threshold: %w", err)
 	}
 
-	httpc := buildHTTPClient()
+	httpc := buildHTTPClientWithProxy(cfg.Proxy)
 
 	emit := func(ev ProgressEvent) {
 		if progress != nil {
@@ -246,7 +247,13 @@ LOOP:
 					return false, "", nil
 				}
 				// Download to temp location, will be moved to blob later
-				dst = filepath.Join(repoDir.BlobsDir(), "tmp-"+filepath.Base(it.RelativePath))
+				// Use SHA256 as temp name to avoid collisions (e.g., multiple config.json files)
+				tmpName := "tmp-" + it.SHA256
+				if it.SHA256 == "" {
+					// Fallback: sanitize path to avoid collisions
+					tmpName = "tmp-" + strings.ReplaceAll(it.RelativePath, "/", "_")
+				}
+				dst = filepath.Join(repoDir.BlobsDir(), tmpName)
 			} else {
 				// Legacy mode: flat directory structure
 				base := destinationBase(job, cfg)

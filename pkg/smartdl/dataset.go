@@ -4,6 +4,7 @@
 package smartdl
 
 import (
+	"fmt"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -282,4 +283,49 @@ func HasMultipleConfigs(info *DatasetInfo) bool {
 // HasMultipleFormats checks if dataset has multiple formats available.
 func HasMultipleFormats(info *DatasetInfo) bool {
 	return len(info.Formats) > 1
+}
+
+// DatasetToSelectableItems converts dataset splits to SelectableItems.
+func DatasetToSelectableItems(info *DatasetInfo) []SelectableItem {
+	if info == nil || len(info.Splits) == 0 {
+		return nil
+	}
+
+	var items []SelectableItem
+
+	// Add splits
+	splitDescriptions := map[string]string{
+		"train":      "Primary training data",
+		"validation": "Validation/evaluation set",
+		"dev":        "Development set",
+		"test":       "Held-out test set",
+		"eval":       "Evaluation set",
+		"default":    "Default dataset split",
+	}
+
+	for _, split := range info.Splits {
+		desc := splitDescriptions[split.Name]
+		if desc == "" {
+			desc = "Dataset split"
+		}
+
+		// Add file count to description
+		if split.FileCount > 0 {
+			desc = fmt.Sprintf("%s (%d files)", desc, split.FileCount)
+		}
+
+		item := SelectableItem{
+			ID:          split.Name,
+			Label:       strings.Title(split.Name),
+			Description: desc,
+			Size:        split.Size,
+			SizeHuman:   split.SizeHuman,
+			Recommended: split.Name == "train",
+			Category:    "split",
+			FilterValue: split.Name,
+		}
+		items = append(items, item)
+	}
+
+	return items
 }

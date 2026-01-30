@@ -136,3 +136,21 @@ func EstimateAdapterSize(info *LoRAInfo, hiddenDim int) int64 {
 	paramsPerModule := int64(2 * info.Rank * hiddenDim)
 	return paramsPerModule * int64(numModules)
 }
+
+// LoRAToRelatedDownloads creates RelatedDownload entries for LoRA adapters.
+// This indicates the base model that is required for the adapter to work.
+func LoRAToRelatedDownloads(info *LoRAInfo) []RelatedDownload {
+	if info == nil || info.BaseModel == "" {
+		return nil
+	}
+
+	return []RelatedDownload{
+		{
+			Type:        "base_model",
+			Repo:        info.BaseModel,
+			Label:       "Base Model (Required)",
+			Description: "This adapter requires the base model to function",
+			Required:    true,
+		},
+	}
+}

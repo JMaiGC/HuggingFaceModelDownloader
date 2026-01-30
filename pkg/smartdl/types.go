@@ -29,7 +29,10 @@
 //	}
 package smartdl
 
-import "time"
+import (
+	"strings"
+	"time"
+)
 
 // RepoType identifies the type of HuggingFace repository.
 type RepoType string
@@ -196,6 +199,19 @@ type RepoInfo struct {
 	Vision       *VisionInfo       `json:"vision,omitempty"`
 	Multimodal   *MultimodalInfo   `json:"multimodal,omitempty"`
 	ONNX         *ONNXInfo         `json:"onnx,omitempty"`
+
+	// SelectableItems provides unified download options across all model types.
+	// For GGUF: quantizations, for Diffusers: components/variants, for Transformers: formats, etc.
+	SelectableItems []SelectableItem `json:"selectable_items,omitempty"`
+
+	// CLICommand is the base download command without filters.
+	CLICommand string `json:"cli_command,omitempty"`
+
+	// CLICommandFull is the download command with recommended filters applied.
+	CLICommandFull string `json:"cli_command_full,omitempty"`
+
+	// RelatedDownloads lists related repositories (e.g., base model for LoRA).
+	RelatedDownloads []RelatedDownload `json:"related_downloads,omitempty"`
 }
 
 // GGUFInfo contains GGUF-specific analysis results.
@@ -466,6 +482,134 @@ type ImageSize struct {
 type ImageNormalization struct {
 	Mean []float64 `json:"mean"`
 	Std  []float64 `json:"std"`
+}
+
+// SelectableItem represents an item that can be selected for download.
+// This provides a unified interface for GGUF quantizations, Diffusers components,
+// Transformers weight formats, dataset splits, etc.
+type SelectableItem struct {
+	// ID is a unique identifier for this item (e.g., "q4_k_m", "fp16", "train").
+	ID string `json:"id"`
+
+	// Label is the display name shown in UI.
+	Label string `json:"label"`
+
+	// Description provides additional context about this option.
+	Description string `json:"description,omitempty"`
+
+	// Size is the item size in bytes.
+	Size int64 `json:"size,omitempty"`
+
+	// SizeHuman is the human-readable size (e.g., "4.1 GiB").
+	SizeHuman string `json:"size_human,omitempty"`
+
+	// Quality is the quality rating (1-5 stars, 0 if not applicable).
+	Quality int `json:"quality,omitempty"`
+
+	// QualityStars is the star representation (e.g., "★★★★☆").
+	QualityStars string `json:"quality_stars,omitempty"`
+
+	// Recommended indicates if this is the default/recommended selection.
+	Recommended bool `json:"recommended,omitempty"`
+
+	// Category groups items (e.g., "quantization", "variant", "component", "split", "format").
+	Category string `json:"category,omitempty"`
+
+	// FilterValue is the value to pass to -F flag for downloading.
+	FilterValue string `json:"filter_value"`
+
+	// Files is the list of files included in this selection.
+	Files []string `json:"files,omitempty"`
+
+	// RAM is the estimated RAM needed (for GGUF quantizations).
+	RAM int64 `json:"ram,omitempty"`
+
+	// RAMHuman is the human-readable RAM estimate.
+	RAMHuman string `json:"ram_human,omitempty"`
+}
+
+// RelatedDownload represents a related repository that may be needed.
+// For example, LoRA adapters require a base model.
+type RelatedDownload struct {
+	// Type identifies the relationship (e.g., "base_model", "vae", "lora").
+	Type string `json:"type"`
+
+	// Repo is the HuggingFace repository ID.
+	Repo string `json:"repo"`
+
+	// Label is the display name.
+	Label string `json:"label"`
+
+	// Description explains why this download is related.
+	Description string `json:"description,omitempty"`
+
+	// Required indicates if this is required for the main download to work.
+	Required bool `json:"required,omitempty"`
+
+	// Size is the estimated size if known.
+	Size int64 `json:"size,omitempty"`
+
+	// SizeHuman is the human-readable size.
+	SizeHuman string `json:"size_human,omitempty"`
+}
+
+// GenerateCLICommand generates the CLI download command for selected items.
+// If selectedFilters is empty, returns the base command without filters.
+func (r *RepoInfo) GenerateCLICommand(selectedFilters []string) string {
+	cmd := "hfdownloader download " + r.Repo
+
+	if r.IsDataset {
+		cmd += " --dataset"
+	}
+
+	// Include revision/branch if specified and not "main"
+	if r.Branch != "" && r.Branch != "main" {
+		cmd += " -b " + r.Branch
+	}
+
+	if len(selectedFilters) > 0 {
+		cmd += " -F " + strings.Join(selectedFilters, ",")
+	}
+
+	return cmd
+}
+
+// GenerateRecommendedCommand generates the CLI command with recommended selections.
+func (r *RepoInfo) GenerateRecommendedCommand() string {
+	var recommended []string
+	for _, item := range r.SelectableItems {
+		if item.Recommended {
+			recommended = append(recommended, item.FilterValue)
+		}
+	}
+	return r.GenerateCLICommand(recommended)
+}
+
+// PopulateCLICommands sets the CLICommand and CLICommandFull fields.
+func (r *RepoInfo) PopulateCLICommands() {
+	r.CLICommand = r.GenerateCLICommand(nil)
+	r.CLICommandFull = r.GenerateRecommendedCommand()
+
+	// If no recommended items, full command equals base command
+	if r.CLICommandFull == r.CLICommand {
+		r.CLICommandFull = ""
+	}
+}
+
+// GetSelectedSize calculates the total size of selected items.
+func (r *RepoInfo) GetSelectedSize(selectedIDs []string) int64 {
+	idMap := make(map[string]bool)
+	for _, id := range selectedIDs {
+		idMap[id] = true
+	}
+
+	var total int64
+	for _, item := range r.SelectableItems {
+		if idMap[item.ID] {
+			total += item.Size
+		}
+	}
+	return total
 }
 
 // MultimodalInfo contains multimodal model-specific analysis results.

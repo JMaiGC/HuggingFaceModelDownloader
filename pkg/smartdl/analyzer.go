@@ -117,6 +117,12 @@ func (a *Analyzer) AnalyzeWithRevision(ctx context.Context, repo string, isDatas
 	// Run type-specific analysis
 	a.analyzeTypeSpecific(info)
 
+	// Populate SelectableItems based on type
+	populateSelectableItems(info)
+
+	// Generate CLI commands
+	info.PopulateCLICommands()
+
 	return info, nil
 }
 
@@ -599,4 +605,22 @@ func humanSize(b int64) string {
 		exp++
 	}
 	return fmt.Sprintf("%.1f %ciB", float64(b)/float64(div), "KMGTPE"[exp])
+}
+
+// populateSelectableItems converts type-specific data to unified SelectableItems.
+func populateSelectableItems(info *RepoInfo) {
+	switch info.Type {
+	case TypeGGUF:
+		info.SelectableItems = GGUFToSelectableItems(info.GGUF)
+	case TypeDiffusers:
+		info.SelectableItems = DiffusersToSelectableItems(info.Diffusers)
+	case TypeTransformers:
+		info.SelectableItems = TransformersToSelectableItems(info.Transformers, info.Files)
+	case TypeDataset:
+		info.SelectableItems = DatasetToSelectableItems(info.Dataset)
+	case TypeLoRA:
+		info.RelatedDownloads = LoRAToRelatedDownloads(info.LoRA)
+	case TypeGPTQ, TypeAWQ:
+		info.SelectableItems = QuantizedToSelectableItems(info.Quantized, info.Files)
+	}
 }

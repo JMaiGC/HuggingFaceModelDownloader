@@ -312,3 +312,288 @@ func TestAPI_ParseFiltersFromRepo(t *testing.T) {
 	}
 }
 
+// --- Delete Cache Security Tests ---
+
+func TestAPI_CacheDelete_PathTraversal(t *testing.T) {
+	srv := newTestServer()
+
+	// Test various path traversal attempts
+	tests := []struct {
+		name     string
+		repo     string
+		wantCode int
+	}{
+		{
+			name:     "direct path traversal",
+			repo:     "../../../etc/passwd",
+			wantCode: http.StatusBadRequest,
+		},
+		{
+			name:     "double dot in owner",
+			repo:     "../passwd/file",
+			wantCode: http.StatusBadRequest,
+		},
+		{
+			name:     "double slash",
+			repo:     "owner//name",
+			wantCode: http.StatusBadRequest,
+		},
+		{
+			name:     "backslash traversal",
+			repo:     "owner\\..\\etc",
+			wantCode: http.StatusBadRequest,
+		},
+		{
+			name:     "just dots owner",
+			repo:     "../name",
+			wantCode: http.StatusBadRequest,
+		},
+		{
+			name:     "just dots name",
+			repo:     "owner/..",
+			wantCode: http.StatusBadRequest,
+		},
+		{
+			name:     "single dot owner",
+			repo:     "./name",
+			wantCode: http.StatusBadRequest,
+		},
+		{
+			name:     "single dot name",
+			repo:     "owner/.",
+			wantCode: http.StatusBadRequest,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest("DELETE", "/api/cache/"+tt.repo, nil)
+			req.SetPathValue("repo", tt.repo)
+			w := httptest.NewRecorder()
+
+			srv.handleCacheDelete(w, req)
+
+			if w.Code != tt.wantCode {
+				t.Errorf("Expected %d for %q, got %d. Body: %s",
+					tt.wantCode, tt.repo, w.Code, w.Body.String())
+			}
+		})
+	}
+}
+
+func TestAPI_CacheDelete_InvalidCharacters(t *testing.T) {
+	srv := newTestServer()
+
+	// Test invalid characters that could be used in attacks
+	// Note: Some characters (null byte, control chars) are rejected by the HTTP layer itself
+	// and cannot reach our handler, so we only test what can actually arrive.
+	tests := []struct {
+		name     string
+		repo     string
+		wantCode int
+	}{
+		{
+			name:     "shell metacharacter semicolon",
+			repo:     "owner/name;rm",
+			wantCode: http.StatusBadRequest,
+		},
+		{
+			name:     "shell metacharacter pipe",
+			repo:     "owner/name|cat",
+			wantCode: http.StatusBadRequest,
+		},
+		{
+			name:     "shell metacharacter backtick",
+			repo:     "owner/`whoami`",
+			wantCode: http.StatusBadRequest,
+		},
+		{
+			name:     "dollar sign",
+			repo:     "owner/$HOME",
+			wantCode: http.StatusBadRequest,
+		},
+		{
+			name:     "colon",
+			repo:     "owner/name:evil",
+			wantCode: http.StatusBadRequest,
+		},
+		{
+			name:     "asterisk",
+			repo:     "owner/name*",
+			wantCode: http.StatusBadRequest,
+		},
+		{
+			name:     "ampersand",
+			repo:     "owner/name&cmd",
+			wantCode: http.StatusBadRequest,
+		},
+		{
+			name:     "space",
+			repo:     "owner/name evil",
+			wantCode: http.StatusBadRequest,
+		},
+		{
+			name:     "at sign",
+			repo:     "owner/@evil",
+			wantCode: http.StatusBadRequest,
+		},
+		{
+			name:     "hash",
+			repo:     "owner/#evil",
+			wantCode: http.StatusBadRequest,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest("DELETE", "/api/cache/test/repo", nil)
+			req.SetPathValue("repo", tt.repo) // Set path value directly to bypass URL parsing
+			w := httptest.NewRecorder()
+
+			srv.handleCacheDelete(w, req)
+
+			if w.Code != tt.wantCode {
+				t.Errorf("Expected %d for %q, got %d. Body: %s",
+					tt.wantCode, tt.repo, w.Code, w.Body.String())
+			}
+		})
+	}
+}
+
+func TestAPI_CacheDelete_ValidRepoFormat(t *testing.T) {
+	// Use a real temp directory (avoids /tmp -> /private/tmp symlink issues on macOS)
+	tempDir := t.TempDir()
+	cfg := Config{
+		Addr:        "127.0.0.1",
+		Port:        0,
+		CacheDir:    tempDir,
+		Concurrency: 2,
+		MaxActive:   1,
+	}
+	srv := New(cfg)
+
+	// Valid format repos should pass validation (may return 404 if not found)
+	tests := []struct {
+		name     string
+		repo     string
+		wantCode int // 404 is OK - it means validation passed
+	}{
+		{
+			name:     "simple valid repo",
+			repo:     "owner/name",
+			wantCode: http.StatusNotFound, // Passes validation, not found in cache
+		},
+		{
+			name:     "repo with dash",
+			repo:     "the-owner/model-name",
+			wantCode: http.StatusNotFound,
+		},
+		{
+			name:     "repo with underscore",
+			repo:     "my_owner/my_model",
+			wantCode: http.StatusNotFound,
+		},
+		{
+			name:     "repo with numbers",
+			repo:     "owner123/model456",
+			wantCode: http.StatusNotFound,
+		},
+		{
+			name:     "repo with period",
+			repo:     "owner.org/model.v1",
+			wantCode: http.StatusNotFound,
+		},
+		{
+			name:     "mixed case",
+			repo:     "TheBloke/Mistral-7B-GGUF",
+			wantCode: http.StatusNotFound,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest("DELETE", "/api/cache/"+tt.repo, nil)
+			req.SetPathValue("repo", tt.repo)
+			w := httptest.NewRecorder()
+
+			srv.handleCacheDelete(w, req)
+
+			if w.Code != tt.wantCode {
+				t.Errorf("Expected %d for %q, got %d. Body: %s",
+					tt.wantCode, tt.repo, w.Code, w.Body.String())
+			}
+		})
+	}
+}
+
+func TestIsValidRepoComponent(t *testing.T) {
+	tests := []struct {
+		input string
+		want  bool
+	}{
+		// Valid
+		{"owner", true},
+		{"my-org", true},
+		{"my_org", true},
+		{"MyOrg123", true},
+		{"model.v1", true},
+		{"a", true},
+		{"1", true},
+		{"a-b_c.d", true},
+
+		// Invalid - special components
+		{"", false},
+		{".", false},
+		{"..", false},
+
+		// Invalid - dangerous characters
+		{"/", false},
+		{"\\", false},
+		{";", false},
+		{"|", false},
+		{"$", false},
+		{"`", false},
+		{"'", false},
+		{"\"", false},
+		{" ", false},
+		{"\n", false},
+		{"\t", false},
+		{"\x00", false},
+		{"*", false},
+		{"?", false},
+		{"<", false},
+		{">", false},
+		{":", false},
+		{"&", false},
+		{"!", false},
+		{"(", false},
+		{")", false},
+		{"[", false},
+		{"]", false},
+		{"{", false},
+		{"}", false},
+		{"@", false},
+		{"#", false},
+		{"%", false},
+		{"^", false},
+		{"=", false},
+		{"+", false},
+		{"~", false},
+
+		// Invalid - mixed valid/invalid
+		{"owner;evil", false},
+		{"owner|evil", false},
+		{"name$var", false},
+		{"../passwd", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			got := isValidRepoComponent(tt.input)
+			if got != tt.want {
+				t.Errorf("isValidRepoComponent(%q) = %v, want %v", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+

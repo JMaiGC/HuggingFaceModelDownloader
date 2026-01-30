@@ -40,7 +40,7 @@ func PlanRepo(ctx context.Context, job Job, cfg Settings) (*Plan, error) {
 	if job.Revision == "" {
 		job.Revision = "main"
 	}
-	httpc := buildHTTPClient()
+	httpc := buildHTTPClientWithProxy(cfg.Proxy)
 	return scanRepo(ctx, httpc, cfg.Token, job, cfg)
 }
 

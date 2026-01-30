@@ -51,29 +51,60 @@ Examples:
   hfdownloader serve --auth-user admin --auth-pass secret  # With authentication
   hfdownloader serve --endpoint https://hf-mirror.com      # Use mirror`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			// Build server config
+			// Build server config from CLI flags
 			cfg := server.Config{
-				Addr:               addr,
-				Port:               port,
-				ModelsDir:          modelsDir,
-				DatasetsDir:        datasetsDir,
-				CacheDir:           cacheDir,
-				Concurrency:        conns,
-				MaxActive:          active,
-				MultipartThreshold: multipartThreshold,
-				Verify:             verify,
-				Retries:            retries,
-				Endpoint:           endpoint,
-				AuthUser:           authUser,
-				AuthPass:           authPass,
+				Addr:        addr,
+				Port:        port,
+				ModelsDir:   modelsDir,
+				DatasetsDir: datasetsDir,
+				CacheDir:    cacheDir,
+				AuthUser:    authUser,
+				AuthPass:    authPass,
 			}
 
-			// Get token from flag or env
+			// Apply config file settings first (for values not set by CLI)
+			if err := server.ApplyConfigToServer(&cfg); err != nil {
+				fmt.Fprintf(os.Stderr, "Warning: could not load config file: %v\n", err)
+			}
+
+			// Then override with CLI flags if explicitly set
+			if cmd.Flags().Changed("connections") {
+				cfg.Concurrency = conns
+			} else if cfg.Concurrency == 0 {
+				cfg.Concurrency = 8 // Default
+			}
+			if cmd.Flags().Changed("max-active") {
+				cfg.MaxActive = active
+			} else if cfg.MaxActive == 0 {
+				cfg.MaxActive = 3 // Default
+			}
+			if cmd.Flags().Changed("multipart-threshold") {
+				cfg.MultipartThreshold = multipartThreshold
+			} else if cfg.MultipartThreshold == "" {
+				cfg.MultipartThreshold = "32MiB" // Default
+			}
+			if cmd.Flags().Changed("verify") {
+				cfg.Verify = verify
+			} else if cfg.Verify == "" {
+				cfg.Verify = "size" // Default
+			}
+			if cmd.Flags().Changed("retries") {
+				cfg.Retries = retries
+			} else if cfg.Retries == 0 {
+				cfg.Retries = 4 // Default
+			}
+			if cmd.Flags().Changed("endpoint") {
+				cfg.Endpoint = endpoint
+			}
+
+			// Get token from flag, env, or config (in that order)
 			token := strings.TrimSpace(ro.Token)
 			if token == "" {
 				token = strings.TrimSpace(os.Getenv("HF_TOKEN"))
 			}
-			cfg.Token = token
+			if token != "" {
+				cfg.Token = token
+			}
 
 			// Create and start server
 			srv := server.New(cfg)
