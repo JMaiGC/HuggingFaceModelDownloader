@@ -91,7 +91,7 @@ bash <(curl -sSL https://g.bodaay.io/hfd) analyze -i TheBloke/Mistral-7B-GGUF
 bash <(curl -sSL https://g.bodaay.io/hfd) download TheBloke/Mistral-7B-GGUF
 
 # Start web UI
-bash <(curl -sSL https://g.bodaay.io/hfd) -w
+bash <(curl -sSL https://g.bodaay.io/hfd) serve
 
 # Start web UI with authentication
 bash <(curl -sSL https://g.bodaay.io/hfd) serve --auth-user admin --auth-pass secret
@@ -100,7 +100,7 @@ bash <(curl -sSL https://g.bodaay.io/hfd) serve --auth-user admin --auth-pass se
 **Like it? Install permanently:**
 
 ```bash
-bash <(curl -sSL https://g.bodaay.io/hfd) -i
+bash <(curl -sSL https://g.bodaay.io/hfd) install
 ```
 
 Now use directly:
@@ -377,7 +377,7 @@ proxy:
 ### One-Liner (Recommended)
 
 ```bash
-bash <(curl -sSL https://g.bodaay.io/hfd) -i
+bash <(curl -sSL https://g.bodaay.io/hfd) install
 ```
 
 That's it. Works on Linux, macOS, and WSL.
@@ -386,7 +386,7 @@ That's it. Works on Linux, macOS, and WSL.
 
 ```bash
 bash <(curl -sSL https://g.bodaay.io/hfd) download TheBloke/Mistral-7B-GGUF
-bash <(curl -sSL https://g.bodaay.io/hfd) -w   # Web UI
+bash <(curl -sSL https://g.bodaay.io/hfd) serve   # Web UI
 ```
 
 ### Download Binary
