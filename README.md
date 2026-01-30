@@ -407,8 +407,15 @@ go build -o hfdownloader ./cmd/hfdownloader
 ### Docker
 
 ```bash
-docker run --rm -v ~/.cache/huggingface:/root/.cache/huggingface \
-  hfdownloader download TheBloke/Mistral-7B-GGUF
+# Pull from GitHub Container Registry
+docker pull ghcr.io/bodaay/huggingfacemodeldownloader:latest
+
+# Or build locally
+docker build -t hfdownloader .
+
+# Run (mounts your local HF cache)
+docker run --rm -v ~/.cache/huggingface:/home/hfdownloader/.cache/huggingface \
+  ghcr.io/bodaay/huggingfacemodeldownloader download TheBloke/Mistral-7B-GGUF
 ```
 
 ---

@@ -1,19 +1,31 @@
 # =============================================================================
-# HuggingFace Model Downloader - Docker Image
+# HuggingFace Model Downloader - Docker Image (v3)
 # =============================================================================
 # Multi-stage build for minimal image size
 #
 # Build:
 #   docker build -t hfdownloader .
 #
-# Run CLI:
-#   docker run --rm -v ./models:/data hfdownloader download TheBloke/Mistral-7B-GGUF -o /data
+# Run CLI (v3 - uses HuggingFace cache structure):
+#   docker run --rm -v ~/.cache/huggingface:/home/hfdownloader/.cache/huggingface \
+#     hfdownloader download TheBloke/Mistral-7B-GGUF
+#
+# Run CLI with filter:
+#   docker run --rm -v ~/.cache/huggingface:/home/hfdownloader/.cache/huggingface \
+#     hfdownloader download TheBloke/Mistral-7B-GGUF:q4_k_m
 #
 # Run Web Server:
-#   docker run --rm -p 8080:8080 -v ./models:/data hfdownloader serve --port 8080 --models-dir /data/Models --datasets-dir /data/Datasets
+#   docker run --rm -p 8080:8080 \
+#     -v ~/.cache/huggingface:/home/hfdownloader/.cache/huggingface \
+#     hfdownloader serve --port 8080
 #
-# With HuggingFace token:
-#   docker run --rm -e HF_TOKEN=hf_xxx -p 8080:8080 hfdownloader serve
+# With HuggingFace token (for private/gated models):
+#   docker run --rm -e HF_TOKEN=hf_xxx -p 8080:8080 \
+#     -v ~/.cache/huggingface:/home/hfdownloader/.cache/huggingface \
+#     hfdownloader serve
+#
+# Legacy mode (v2 behavior - flat directory structure):
+#   docker run --rm -v ./models:/data hfdownloader download TheBloke/Mistral-7B-GGUF --legacy -o /data
 #
 # Credits: Original Docker support suggested by cdeving (#50)
 # =============================================================================
@@ -50,13 +62,20 @@ RUN adduser -D -u 1000 hfdownloader
 # Copy binary from builder
 COPY --from=builder /hfdownloader /usr/local/bin/hfdownloader
 
-# Create data directory
-RUN mkdir -p /data/Models /data/Datasets && chown -R hfdownloader:hfdownloader /data
+# Create HuggingFace cache directory (v3 default) and legacy data directory
+RUN mkdir -p /home/hfdownloader/.cache/huggingface/hub \
+             /home/hfdownloader/.cache/huggingface/models \
+             /home/hfdownloader/.cache/huggingface/datasets \
+             /data/Models /data/Datasets && \
+    chown -R hfdownloader:hfdownloader /home/hfdownloader /data
 
 # Switch to non-root user
 USER hfdownloader
 
-WORKDIR /data
+# Set HF_HOME for the container
+ENV HF_HOME=/home/hfdownloader/.cache/huggingface
+
+WORKDIR /home/hfdownloader
 
 # Default to showing help
 ENTRYPOINT ["/usr/local/bin/hfdownloader"]
