@@ -143,17 +143,16 @@ else
     exit 0
 fi
 
+# Cleanup function for temp binary
+cleanup() {
+    rm -f "$temp_binary" 2>/dev/null || true
+}
+trap cleanup EXIT
+
 # Web mode: start server and open browser
 if [ "$web_mode" = true ]; then
     info "Starting HuggingFace Downloader Web UI..."
-    
-    # Move to local binary
-    local_binary="./${binary_name}"
-    if [ -d "$local_binary" ]; then
-        local_binary="./${binary_name}_bin"
-    fi
-    mv "$temp_binary" "$local_binary" 2>/dev/null || true
-    
+
     # Determine how to open browser
     open_browser() {
         local url="$1"
@@ -165,10 +164,10 @@ if [ "$web_mode" = true ]; then
             start "$url" &>/dev/null &
         fi
     }
-    
+
     echo ""
     echo -e "${CYAN}╭────────────────────────────────────────────────────────╮${NC}"
-    echo -e "${CYAN}│${NC}     🤗  ${GREEN}HuggingFace Downloader Web UI${NC}                  ${CYAN}│${NC}"
+    echo -e "${CYAN}│${NC}     HuggingFace Downloader Web UI                      ${CYAN}│${NC}"
     echo -e "${CYAN}├────────────────────────────────────────────────────────┤${NC}"
     echo -e "${CYAN}│${NC}                                                        ${CYAN}│${NC}"
     echo -e "${CYAN}│${NC}  Dashboard:  ${GREEN}http://localhost:${web_port}${NC}                      ${CYAN}│${NC}"
@@ -177,42 +176,18 @@ if [ "$web_mode" = true ]; then
     echo -e "${CYAN}│${NC}                                                        ${CYAN}│${NC}"
     echo -e "${CYAN}╰────────────────────────────────────────────────────────╯${NC}"
     echo ""
-    
+
     # Open browser after a short delay
     (sleep 1.5 && open_browser "http://localhost:${web_port}") &
-    
-    # Run the server
-    exec "$local_binary" serve --port "$web_port" "${passthrough_args[@]}"
+
+    # Run the server directly from temp binary (cleanup on exit)
+    exec "$temp_binary" serve --port "$web_port" "${passthrough_args[@]}"
 fi
 
-# Run mode: execute with passed arguments
-local_binary="./${binary_name}"
-
-# Handle edge case: if a directory with binary name exists (e.g., Go package)
-if [ -d "$local_binary" ]; then
-    local_binary="./${binary_name}_bin"
-    warn "Directory './${binary_name}' exists, using '${local_binary}' instead"
-fi
-
-# Check if we already have a local copy
-if [ -f "$local_binary" ]; then
-    # Compare versions if possible
-    existing_version=$("$local_binary" --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1 || echo "")
-    if [ "$existing_version" = "$latest_tag" ]; then
-        info "Using existing ./${binary_name} (v${existing_version})"
-        rm -f "$temp_binary"
-    else
-        warn "Updating ./${binary_name} from v${existing_version:-unknown} to v${latest_tag}"
-        mv "$temp_binary" "$local_binary"
-    fi
-else
-    mv "$temp_binary" "$local_binary"
-    ok "Saved: ${local_binary}"
-fi
-
-# Run with passed arguments, or show help if none
+# Run mode: execute with passed arguments directly from temp binary
+# No installation to current directory - use -i flag to install
 if [ ${#passthrough_args[@]} -eq 0 ]; then
-    exec "$local_binary" --help
+    exec "$temp_binary" --help
 else
-    exec "$local_binary" "${passthrough_args[@]}"
+    exec "$temp_binary" "${passthrough_args[@]}"
 fi
