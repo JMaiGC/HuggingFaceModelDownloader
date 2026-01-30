@@ -90,6 +90,9 @@ bash <(curl -sSL https://g.bodaay.io/hfd) download TheBloke/Mistral-7B-GGUF
 
 # Start web UI
 bash <(curl -sSL https://g.bodaay.io/hfd) -w
+
+# Start web UI with authentication
+bash <(curl -sSL https://g.bodaay.io/hfd) serve --auth-user admin --auth-pass secret
 ```
 
 **Like it? Install permanently:**
@@ -104,6 +107,7 @@ Now use directly:
 hfdownloader analyze -i TheBloke/Mistral-7B-GGUF
 hfdownloader download TheBloke/Mistral-7B-GGUF:q4_k_m
 hfdownloader serve
+hfdownloader serve --auth-user admin --auth-pass secret   # with authentication
 ```
 
 Files go to `~/.cache/huggingface/` — Python libraries find them automatically.
