@@ -79,36 +79,31 @@ hfdownloader download meta-llama/Llama-2-7b --proxy socks5://localhost:1080
 
 ## Quick Start
 
-**One command. That's it.**
+**Try it first — no installation required:**
+
+```bash
+# Analyze a model with interactive GGUF picker
+bash <(curl -sSL https://g.bodaay.io/hfd) analyze -i TheBloke/Mistral-7B-GGUF
+
+# Download a model
+bash <(curl -sSL https://g.bodaay.io/hfd) download TheBloke/Mistral-7B-GGUF
+
+# Start web UI
+bash <(curl -sSL https://g.bodaay.io/hfd) -w
+```
+
+**Like it? Install permanently:**
 
 ```bash
 bash <(curl -sSL https://g.bodaay.io/hfd) -i
 ```
 
-This installs `hfdownloader` to `/usr/local/bin`. Now you're ready:
+Now use directly:
 
 ```bash
-# Download a model
-hfdownloader download TheBloke/Mistral-7B-GGUF
-
-# Download specific quantization
-hfdownloader download TheBloke/Mistral-7B-GGUF:q4_k_m
-
-# Analyze with interactive picker
 hfdownloader analyze -i TheBloke/Mistral-7B-GGUF
-
-# Start web UI
+hfdownloader download TheBloke/Mistral-7B-GGUF:q4_k_m
 hfdownloader serve
-```
-
-**Don't want to install?** Run directly:
-
-```bash
-# Download without installing anything
-bash <(curl -sSL https://g.bodaay.io/hfd) download TheBloke/Mistral-7B-GGUF
-
-# Start web UI instantly
-bash <(curl -sSL https://g.bodaay.io/hfd) -w
 ```
 
 Files go to `~/.cache/huggingface/` — Python libraries find them automatically.
