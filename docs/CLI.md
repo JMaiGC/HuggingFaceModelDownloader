@@ -47,7 +47,7 @@ go build -o hfdownloader ./cmd/hfdownloader
 hfdownloader download owner/model
 
 # Download specific quantizations
-hfdownloader download TheBloke/Mistral-7B-GGUF:q4_k_m,q5_k_m
+hfdownloader download TheBloke/Mistral-7B-Instruct-v0.2-GGUF:q4_k_m,q5_k_m
 
 # Download a dataset
 hfdownloader download facebook/flores --dataset
@@ -167,13 +167,13 @@ hfdownloader [REPO] [flags]              # Same as above
 
 ```bash
 # Basic download
-hfdownloader download TheBloke/Mistral-7B-GGUF
+hfdownloader download TheBloke/Mistral-7B-Instruct-v0.2-GGUF
 
 # Filter syntax in repo name
-hfdownloader download TheBloke/Mistral-7B-GGUF:q4_k_m,q5_k_m
+hfdownloader download TheBloke/Mistral-7B-Instruct-v0.2-GGUF:q4_k_m,q5_k_m
 
 # Or use --filters flag
-hfdownloader download TheBloke/Mistral-7B-GGUF -F q4_k_m,q5_k_m
+hfdownloader download TheBloke/Mistral-7B-Instruct-v0.2-GGUF -F q4_k_m,q5_k_m
 
 # Exclude files
 hfdownloader download owner/repo -E ".md,.txt,fp16"
@@ -309,7 +309,7 @@ hfdownloader analyze <repo> [flags]
 
 ```bash
 # Analyze model
-hfdownloader analyze TheBloke/Mistral-7B-GGUF
+hfdownloader analyze TheBloke/Mistral-7B-Instruct-v0.2-GGUF
 
 # Analyze dataset
 hfdownloader analyze facebook/flores
@@ -927,8 +927,8 @@ proxy:
 
 ```bash
 # 1. Analyze → Select → Download
-hfdownloader analyze TheBloke/Mistral-7B-GGUF
-hfdownloader download TheBloke/Mistral-7B-GGUF:q4_k_m
+hfdownloader analyze TheBloke/Mistral-7B-Instruct-v0.2-GGUF
+hfdownloader download TheBloke/Mistral-7B-Instruct-v0.2-GGUF:q4_k_m
 
 # 2. Download entire model
 hfdownloader download meta-llama/Llama-3-8B-Instruct

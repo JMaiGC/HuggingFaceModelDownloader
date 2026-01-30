@@ -505,7 +505,7 @@ func TestAPI_CacheDelete_ValidRepoFormat(t *testing.T) {
 		},
 		{
 			name:     "mixed case",
-			repo:     "TheBloke/Mistral-7B-GGUF",
+			repo:     "TheBloke/Mistral-7B-Instruct-v0.2-GGUF",
 			wantCode: http.StatusNotFound,
 		},
 	}

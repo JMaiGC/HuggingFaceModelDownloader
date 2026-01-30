@@ -64,7 +64,7 @@ Downloads go to the standard HuggingFace cache. Python libraries find them autom
 
 ```python
 from transformers import AutoModel
-model = AutoModel.from_pretrained("TheBloke/Mistral-7B-GGUF")  # Just works
+model = AutoModel.from_pretrained("TheBloke/Mistral-7B-Instruct-v0.2-GGUF")  # Just works
 ```
 
 Plus, you get **human-readable paths** at `~/.cache/huggingface/models/` for easy browsing.
@@ -85,10 +85,10 @@ hfdownloader download meta-llama/Llama-2-7b --proxy socks5://localhost:1080
 
 ```bash
 # Analyze a model with interactive GGUF picker
-bash <(curl -sSL https://g.bodaay.io/hfd) analyze -i TheBloke/Mistral-7B-GGUF
+bash <(curl -sSL https://g.bodaay.io/hfd) analyze -i TheBloke/Mistral-7B-Instruct-v0.2-GGUF
 
 # Download a model
-bash <(curl -sSL https://g.bodaay.io/hfd) download TheBloke/Mistral-7B-GGUF
+bash <(curl -sSL https://g.bodaay.io/hfd) download TheBloke/Mistral-7B-Instruct-v0.2-GGUF
 
 # Start web UI
 bash <(curl -sSL https://g.bodaay.io/hfd) serve
@@ -106,8 +106,8 @@ bash <(curl -sSL https://g.bodaay.io/hfd) install
 Now use directly:
 
 ```bash
-hfdownloader analyze -i TheBloke/Mistral-7B-GGUF
-hfdownloader download TheBloke/Mistral-7B-GGUF:q4_k_m
+hfdownloader analyze -i TheBloke/Mistral-7B-Instruct-v0.2-GGUF
+hfdownloader download TheBloke/Mistral-7B-Instruct-v0.2-GGUF:q4_k_m
 hfdownloader serve
 hfdownloader serve --auth-user admin --auth-pass secret   # with authentication
 ```
@@ -163,13 +163,13 @@ Download specific files without extra flags:
 
 ```bash
 # Download only Q4_K_M quantization
-hfdownloader download TheBloke/Mistral-7B-GGUF:q4_k_m
+hfdownloader download TheBloke/Mistral-7B-Instruct-v0.2-GGUF:q4_k_m
 
 # Download multiple quantizations
-hfdownloader download TheBloke/Mistral-7B-GGUF:q4_k_m,q5_k_m
+hfdownloader download TheBloke/Mistral-7B-Instruct-v0.2-GGUF:q4_k_m,q5_k_m
 
 # Or use flags
-hfdownloader download TheBloke/Mistral-7B-GGUF -F q4_k_m -E ".md,fp16"
+hfdownloader download TheBloke/Mistral-7B-Instruct-v0.2-GGUF -F q4_k_m -E ".md,fp16"
 ```
 
 ### Resume & Verify
@@ -229,11 +229,11 @@ We maintain **two views** of your downloads:
 Every download creates `hfd.yaml` so you know exactly what you have:
 
 ```yaml
-repo: TheBloke/Mistral-7B-GGUF
+repo: TheBloke/Mistral-7B-Instruct-v0.2-GGUF
 branch: main
 commit: a1b2c3d4...
 downloaded_at: 2024-01-15T10:30:00Z
-command: hfdownloader download TheBloke/Mistral-7B-GGUF -F q4_k_m
+command: hfdownloader download TheBloke/Mistral-7B-Instruct-v0.2-GGUF -F q4_k_m
 files:
   - path: mistral-7b.Q4_K_M.gguf
     size: 4368438272
@@ -385,7 +385,7 @@ That's it. Works on Linux, macOS, and WSL.
 **Or run without installing:**
 
 ```bash
-bash <(curl -sSL https://g.bodaay.io/hfd) download TheBloke/Mistral-7B-GGUF
+bash <(curl -sSL https://g.bodaay.io/hfd) download TheBloke/Mistral-7B-Instruct-v0.2-GGUF
 bash <(curl -sSL https://g.bodaay.io/hfd) serve   # Web UI
 ```
 
@@ -420,7 +420,7 @@ docker build -t hfdownloader .
 
 # Run (mounts your local HF cache)
 docker run --rm -v ~/.cache/huggingface:/home/hfdownloader/.cache/huggingface \
-  ghcr.io/bodaay/huggingfacemodeldownloader download TheBloke/Mistral-7B-GGUF
+  ghcr.io/bodaay/huggingfacemodeldownloader download TheBloke/Mistral-7B-Instruct-v0.2-GGUF
 ```
 
 ---

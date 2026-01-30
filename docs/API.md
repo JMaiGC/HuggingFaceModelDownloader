@@ -125,14 +125,14 @@ Start a new download job.
 Filters can be embedded in repo name:
 
 ```json
-{ "repo": "TheBloke/Mistral-7B-GGUF:q4_k_m,q5_k_m" }
+{ "repo": "TheBloke/Mistral-7B-Instruct-v0.2-GGUF:q4_k_m,q5_k_m" }
 ```
 
 Or as separate field:
 
 ```json
 {
-  "repo": "TheBloke/Mistral-7B-GGUF",
+  "repo": "TheBloke/Mistral-7B-Instruct-v0.2-GGUF",
   "filters": ["q4_k_m", "q5_k_m"]
 }
 ```
@@ -142,7 +142,7 @@ Or as separate field:
 ```json
 {
   "id": "a1b2c3d4e5f6",
-  "repo": "TheBloke/Mistral-7B-GGUF",
+  "repo": "TheBloke/Mistral-7B-Instruct-v0.2-GGUF",
   "revision": "main",
   "isDataset": false,
   "filters": ["q4_k_m"],
@@ -179,13 +179,13 @@ Or as separate field:
 # Basic download
 curl -X POST http://localhost:8080/api/download \
   -H "Content-Type: application/json" \
-  -d '{"repo": "TheBloke/Mistral-7B-GGUF"}'
+  -d '{"repo": "TheBloke/Mistral-7B-Instruct-v0.2-GGUF"}'
 
 # With filters
 curl -X POST http://localhost:8080/api/download \
   -H "Content-Type: application/json" \
   -d '{
-    "repo": "TheBloke/Mistral-7B-GGUF",
+    "repo": "TheBloke/Mistral-7B-Instruct-v0.2-GGUF",
     "filters": ["q4_k_m", "q5_k_m"]
   }'
 
@@ -214,7 +214,7 @@ Same as `/api/download`.
 
 ```json
 {
-  "repo": "TheBloke/Mistral-7B-GGUF",
+  "repo": "TheBloke/Mistral-7B-Instruct-v0.2-GGUF",
   "revision": "main",
   "files": [
     {
@@ -238,7 +238,7 @@ Same as `/api/download`.
 ```bash
 curl -X POST http://localhost:8080/api/plan \
   -H "Content-Type: application/json" \
-  -d '{"repo": "TheBloke/Mistral-7B-GGUF", "filters": ["q4_k_m"]}'
+  -d '{"repo": "TheBloke/Mistral-7B-Instruct-v0.2-GGUF", "filters": ["q4_k_m"]}'
 ```
 
 ---
@@ -256,7 +256,7 @@ List all download jobs.
   "jobs": [
     {
       "id": "a1b2c3d4e5f6",
-      "repo": "TheBloke/Mistral-7B-GGUF",
+      "repo": "TheBloke/Mistral-7B-Instruct-v0.2-GGUF",
       "revision": "main",
       "isDataset": false,
       "filters": ["q4_k_m"],
@@ -317,7 +317,7 @@ Get specific job details.
 ```json
 {
   "id": "a1b2c3d4e5f6",
-  "repo": "TheBloke/Mistral-7B-GGUF",
+  "repo": "TheBloke/Mistral-7B-Instruct-v0.2-GGUF",
   "status": "running",
   /* ... full job object ... */
 }
@@ -609,7 +609,7 @@ When a repo exists as both model and dataset:
 
 ```bash
 # Analyze model
-curl http://localhost:8080/api/analyze/TheBloke/Mistral-7B-GGUF
+curl http://localhost:8080/api/analyze/TheBloke/Mistral-7B-Instruct-v0.2-GGUF
 
 # Force dataset
 curl "http://localhost:8080/api/analyze/facebook/flores?dataset=true"
@@ -656,7 +656,7 @@ List cached repositories.
 {
   "repos": [
     {
-      "repo": "TheBloke/Mistral-7B-GGUF",
+      "repo": "TheBloke/Mistral-7B-Instruct-v0.2-GGUF",
       "type": "model",
       "path": "/home/user/.cache/huggingface/hub/models--TheBloke--Mistral-7B-GGUF"
     },
@@ -697,7 +697,7 @@ Get cached repository details.
 
 ```json
 {
-  "repo": "TheBloke/Mistral-7B-GGUF",
+  "repo": "TheBloke/Mistral-7B-Instruct-v0.2-GGUF",
   "type": "model",
   "path": "/home/user/.cache/huggingface/hub/models--TheBloke--Mistral-7B-GGUF",
   "snapshots": ["main", "v1.0"]
@@ -715,7 +715,7 @@ Get cached repository details.
 **Example**
 
 ```bash
-curl http://localhost:8080/api/cache/TheBloke/Mistral-7B-GGUF
+curl http://localhost:8080/api/cache/TheBloke/Mistral-7B-Instruct-v0.2-GGUF
 ```
 
 ---
@@ -920,12 +920,12 @@ asyncio.run(monitor())
 
 ```bash
 # 1. Analyze repository
-curl http://localhost:8080/api/analyze/TheBloke/Mistral-7B-GGUF
+curl http://localhost:8080/api/analyze/TheBloke/Mistral-7B-Instruct-v0.2-GGUF
 
 # 2. Start download with specific quantization
 curl -X POST http://localhost:8080/api/download \
   -H "Content-Type: application/json" \
-  -d '{"repo": "TheBloke/Mistral-7B-GGUF", "filters": ["q4_k_m"]}'
+  -d '{"repo": "TheBloke/Mistral-7B-Instruct-v0.2-GGUF", "filters": ["q4_k_m"]}'
 
 # 3. Monitor progress
 curl http://localhost:8080/api/jobs

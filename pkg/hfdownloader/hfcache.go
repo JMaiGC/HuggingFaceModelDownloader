@@ -331,7 +331,7 @@ func isProcessAlive(pid int) bool {
 }
 
 // FriendlyPath returns the path in the friendly view for this repo.
-// Example: ~/.cache/huggingface/models/TheBloke/Mistral-7B-GGUF
+// Example: ~/.cache/huggingface/models/TheBloke/Mistral-7B-Instruct-v0.2-GGUF
 func (r *RepoDir) FriendlyPath() string {
 	if r.repoType == RepoTypeDataset {
 		return filepath.Join(r.cache.DatasetsDir(), r.owner, r.name)

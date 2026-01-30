@@ -8,11 +8,11 @@
 #
 # Run CLI (v3 - uses HuggingFace cache structure):
 #   docker run --rm -v ~/.cache/huggingface:/home/hfdownloader/.cache/huggingface \
-#     hfdownloader download TheBloke/Mistral-7B-GGUF
+#     hfdownloader download TheBloke/Mistral-7B-Instruct-v0.2-GGUF
 #
 # Run CLI with filter:
 #   docker run --rm -v ~/.cache/huggingface:/home/hfdownloader/.cache/huggingface \
-#     hfdownloader download TheBloke/Mistral-7B-GGUF:q4_k_m
+#     hfdownloader download TheBloke/Mistral-7B-Instruct-v0.2-GGUF:q4_k_m
 #
 # Run Web Server:
 #   docker run --rm -p 8080:8080 \
@@ -25,7 +25,7 @@
 #     hfdownloader serve
 #
 # Legacy mode (v2 behavior - flat directory structure):
-#   docker run --rm -v ./models:/data hfdownloader download TheBloke/Mistral-7B-GGUF --legacy -o /data
+#   docker run --rm -v ./models:/data hfdownloader download TheBloke/Mistral-7B-Instruct-v0.2-GGUF --legacy -o /data
 #
 # Credits: Original Docker support suggested by cdeving (#50)
 # =============================================================================

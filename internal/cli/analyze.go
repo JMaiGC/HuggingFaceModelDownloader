@@ -52,7 +52,7 @@ Examples:
   hfdownloader analyze --dataset HuggingFaceFW/fineweb
 
   # Get JSON output for scripting
-  hfdownloader analyze --format json TheBloke/Mistral-7B-GGUF`,
+  hfdownloader analyze --format json TheBloke/Mistral-7B-Instruct-v0.2-GGUF`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			repo := args[0]

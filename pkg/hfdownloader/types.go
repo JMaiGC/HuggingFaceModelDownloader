@@ -12,12 +12,12 @@ import (
 //
 // A Job specifies the repository, revision, and optional filters for selecting
 // which files to download. The Repo field is required and must be in
-// "owner/name" format (e.g., "TheBloke/Mistral-7B-GGUF").
+// "owner/name" format (e.g., "TheBloke/Mistral-7B-Instruct-v0.2-GGUF").
 //
 // Example:
 //
 //	job := hfdownloader.Job{
-//	    Repo:     "TheBloke/Mistral-7B-GGUF",
+//	    Repo:     "TheBloke/Mistral-7B-Instruct-v0.2-GGUF",
 //	    Revision: "main",
 //	    Filters:  []string{"q4_k_m"},
 //	}
@@ -26,7 +26,7 @@ type Job struct {
 	// This field is required.
 	//
 	// Examples:
-	//   - "TheBloke/Mistral-7B-GGUF"
+	//   - "TheBloke/Mistral-7B-Instruct-v0.2-GGUF"
 	//   - "meta-llama/Llama-2-7b"
 	//   - "facebook/flores" (dataset)
 	Repo string

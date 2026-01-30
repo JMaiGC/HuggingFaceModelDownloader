@@ -55,9 +55,9 @@ The repo can be specified as:
   - Partial match: repo (if unique)
 
 Examples:
-  hfdownloader info TheBloke/Mistral-7B-GGUF
+  hfdownloader info TheBloke/Mistral-7B-Instruct-v0.2-GGUF
   hfdownloader info Mistral-7B-GGUF
-  hfdownloader info --format json TheBloke/Mistral-7B-GGUF`,
+  hfdownloader info --format json TheBloke/Mistral-7B-Instruct-v0.2-GGUF`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// Determine cache directory

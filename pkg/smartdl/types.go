@@ -15,7 +15,7 @@
 //	    Endpoint: "https://huggingface.co",
 //	})
 //
-//	info, err := analyzer.Analyze(ctx, "TheBloke/Mistral-7B-GGUF", false)
+//	info, err := analyzer.Analyze(ctx, "TheBloke/Mistral-7B-Instruct-v0.2-GGUF", false)
 //	if err != nil {
 //	    log.Fatal(err)
 //	}

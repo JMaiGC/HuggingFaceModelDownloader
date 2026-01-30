@@ -36,7 +36,7 @@ Download specific branches, tags, or commits:
 
 ```bash
 # Download a specific branch
-hfdownloader download TheBloke/Mistral-7B-GGUF --revision main
+hfdownloader download TheBloke/Mistral-7B-Instruct-v0.2-GGUF --revision main
 
 # Download a specific tag
 hfdownloader download owner/repo --revision v1.0.0
@@ -76,7 +76,7 @@ hfdownloader serve --auth-user admin --auth-pass secret
 Still need the old flat directory structure? Use `--legacy`:
 
 ```bash
-hfdownloader download TheBloke/Mistral-7B-GGUF --legacy -o ./models
+hfdownloader download TheBloke/Mistral-7B-Instruct-v0.2-GGUF --legacy -o ./models
 ```
 
 ---
@@ -101,10 +101,10 @@ docker run --rm -p 8080:8080 \
 
 ```bash
 # Analyze a model (no download)
-bash <(curl -sSL https://g.bodaay.io/hfd) analyze TheBloke/Mistral-7B-GGUF
+bash <(curl -sSL https://g.bodaay.io/hfd) analyze TheBloke/Mistral-7B-Instruct-v0.2-GGUF
 
 # Download Q4_K_M quantization only
-bash <(curl -sSL https://g.bodaay.io/hfd) download TheBloke/Mistral-7B-GGUF:q4_k_m
+bash <(curl -sSL https://g.bodaay.io/hfd) download TheBloke/Mistral-7B-Instruct-v0.2-GGUF:q4_k_m
 
 # Start web UI with authentication
 bash <(curl -sSL https://g.bodaay.io/hfd) serve --auth-user admin --auth-pass secret
