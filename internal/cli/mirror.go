@@ -230,7 +230,14 @@ Examples:
 			}
 			targetPath := targetsCfg.ResolvePath(targetRef)
 
-			// Local cache
+			// Local cache: CLI flag > config file > HF_HOME > default
+			if cacheDir == "" {
+				if cfg := loadConfigMap(); cfg != nil {
+					if v, ok := cfg["cache-dir"].(string); ok && v != "" {
+						cacheDir = v
+					}
+				}
+			}
 			if cacheDir == "" {
 				cacheDir = hfdownloader.DefaultCacheDir()
 			}
@@ -403,6 +410,14 @@ Examples:
 			}
 			targetPath := targetsCfg.ResolvePath(targetRef)
 
+			// CLI flag > config file > HF_HOME > default
+			if cacheDir == "" {
+				if cfg := loadConfigMap(); cfg != nil {
+					if v, ok := cfg["cache-dir"].(string); ok && v != "" {
+						cacheDir = v
+					}
+				}
+			}
 			if cacheDir == "" {
 				cacheDir = hfdownloader.DefaultCacheDir()
 			}
@@ -455,6 +470,14 @@ Examples:
 			}
 			targetPath := targetsCfg.ResolvePath(targetRef)
 
+			// CLI flag > config file > HF_HOME > default
+			if cacheDir == "" {
+				if cfg := loadConfigMap(); cfg != nil {
+					if v, ok := cfg["cache-dir"].(string); ok && v != "" {
+						cacheDir = v
+					}
+				}
+			}
 			if cacheDir == "" {
 				cacheDir = hfdownloader.DefaultCacheDir()
 			}

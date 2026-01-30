@@ -52,7 +52,14 @@ Examples:
   hfdownloader list --sort size         # Sort by size (largest first)
   hfdownloader list --format json       # Output as JSON`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			// Determine cache directory
+			// Determine cache directory: CLI flag > config file > HF_HOME > default
+			if cacheDir == "" {
+				if cfg := loadConfigMap(); cfg != nil {
+					if v, ok := cfg["cache-dir"].(string); ok && v != "" {
+						cacheDir = v
+					}
+				}
+			}
 			if cacheDir == "" {
 				cacheDir = hfdownloader.DefaultCacheDir()
 			}

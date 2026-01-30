@@ -48,7 +48,14 @@ These symlink to the actual files in:
 A standalone rebuild.sh script is automatically written to the cache directory
 during downloads. Use --write-script to manually update this script.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			// Determine cache directory
+			// Determine cache directory: CLI flag > config file > HF_HOME > default
+			if cacheDir == "" {
+				if cfg := loadConfigMap(); cfg != nil {
+					if v, ok := cfg["cache-dir"].(string); ok && v != "" {
+						cacheDir = v
+					}
+				}
+			}
 			if cacheDir == "" {
 				cacheDir = hfdownloader.DefaultCacheDir()
 			}

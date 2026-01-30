@@ -17,6 +17,7 @@ import (
 // ConfigFile represents the persistent configuration file format.
 // This matches the CLI config file format for consistency.
 type ConfigFile struct {
+	CacheDir           string       `json:"cache-dir,omitempty" yaml:"cache-dir,omitempty"`
 	Token              string       `json:"token,omitempty" yaml:"token,omitempty"`
 	Connections        int          `json:"connections,omitempty" yaml:"connections,omitempty"`
 	MaxActive          int          `json:"max-active,omitempty" yaml:"max-active,omitempty"`
@@ -146,6 +147,9 @@ func ApplyConfigToServer(serverCfg *Config) error {
 	}
 
 	// Only apply values that are not already set via CLI
+	if serverCfg.CacheDir == "" && fileCfg.CacheDir != "" {
+		serverCfg.CacheDir = fileCfg.CacheDir
+	}
 	if serverCfg.Token == "" && fileCfg.Token != "" {
 		serverCfg.Token = fileCfg.Token
 	}

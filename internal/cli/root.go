@@ -315,6 +315,47 @@ func buildCommandString(cmd *cobra.Command, job hfdownloader.Job, cfg hfdownload
 	return strings.Join(parts, " ")
 }
 
+// loadConfigMap loads the config file and returns it as a map.
+// Returns nil if no config file exists.
+func loadConfigMap() map[string]any {
+	home, _ := os.UserHomeDir()
+	// Try JSON first, then YAML
+	jsonPath := filepath.Join(home, ".config", "hfdownloader.json")
+	yamlPath := filepath.Join(home, ".config", "hfdownloader.yaml")
+	ymlPath := filepath.Join(home, ".config", "hfdownloader.yml")
+
+	var path string
+	if _, err := os.Stat(jsonPath); err == nil {
+		path = jsonPath
+	} else if _, err := os.Stat(yamlPath); err == nil {
+		path = yamlPath
+	} else if _, err := os.Stat(ymlPath); err == nil {
+		path = ymlPath
+	}
+	if path == "" {
+		return nil
+	}
+
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return nil
+	}
+
+	var cfg map[string]any
+	ext := strings.ToLower(filepath.Ext(path))
+	switch ext {
+	case ".yaml", ".yml":
+		if err := yaml.Unmarshal(b, &cfg); err != nil {
+			return nil
+		}
+	default:
+		if err := json.Unmarshal(b, &cfg); err != nil {
+			return nil
+		}
+	}
+	return cfg
+}
+
 func applySettingsDefaults(cmd *cobra.Command, ro *RootOpts, dst *hfdownloader.Settings) error {
 	path := ro.Config
 	if path == "" {
@@ -375,8 +416,8 @@ func applySettingsDefaults(cmd *cobra.Command, ro *RootOpts, dst *hfdownloader.S
 		}
 	}
 
-	// Note: We don't load "output" from config - it's now dynamic based on model/dataset type
-	// setStr("output", func(v string) { dst.OutputDir = v })
+	// Load cache-dir from config (v3 replaces the old "output" setting)
+	setStr("cache-dir", func(v string) { dst.CacheDir = v })
 	setInt("connections", func(v int) { dst.Concurrency = v })
 	setInt("max-active", func(v int) { dst.MaxActiveDownloads = v })
 	setStr("multipart-threshold", func(v string) { dst.MultipartThreshold = v })

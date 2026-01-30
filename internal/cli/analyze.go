@@ -24,6 +24,7 @@ func newAnalyzeCmd(ctx context.Context, ro *RootOpts) *cobra.Command {
 		formatOut   string
 		revision    string
 		interactive bool
+		cacheDir    string
 	)
 
 	cmd := &cobra.Command{
@@ -113,7 +114,7 @@ Examples:
 					}
 				}
 
-				return runInteractiveSelector(ctx, info, ro)
+				return runInteractiveSelector(ctx, info, ro, cacheDir)
 			}
 
 			// Human-readable output
@@ -127,12 +128,13 @@ Examples:
 	cmd.Flags().StringVar(&formatOut, "format", "text", "Output format: text, json")
 	cmd.Flags().StringVarP(&revision, "revision", "b", "main", "Branch or revision to analyze (e.g. main, gptq-4bit-32g-actorder_True)")
 	cmd.Flags().BoolVarP(&interactive, "interactive", "i", false, "Launch interactive TUI for selecting files to download")
+	cmd.Flags().StringVar(&cacheDir, "cache-dir", "", "HuggingFace cache directory (default: ~/.cache/huggingface or HF_HOME)")
 
 	return cmd
 }
 
 // runInteractiveSelector launches the TUI selector and handles the result.
-func runInteractiveSelector(ctx context.Context, info *smartdl.RepoInfo, ro *RootOpts) error {
+func runInteractiveSelector(ctx context.Context, info *smartdl.RepoInfo, ro *RootOpts, cacheDir string) error {
 	// Check if there are selectable items
 	if len(info.SelectableItems) == 0 {
 		fmt.Println("No selectable items found for this repository.")
@@ -176,8 +178,10 @@ func runInteractiveSelector(ctx context.Context, info *smartdl.RepoInfo, ro *Roo
 			token = strings.TrimSpace(os.Getenv("HF_TOKEN"))
 		}
 
+		// Build settings - use defaults, then apply config file
 		cfg := hfdownloader.Settings{
 			Token:              token,
+			CacheDir:           cacheDir,
 			Concurrency:        8,
 			MaxActiveDownloads: 3,
 			MultipartThreshold: "32MiB",
@@ -185,6 +189,30 @@ func runInteractiveSelector(ctx context.Context, info *smartdl.RepoInfo, ro *Roo
 			Retries:            4,
 			BackoffInitial:     "400ms",
 			BackoffMax:         "10s",
+		}
+
+		// Load settings from config file (respects cache-dir, connections, etc.)
+		if cfgFile := loadConfigMap(); cfgFile != nil {
+			if cacheDir == "" {
+				if v, ok := cfgFile["cache-dir"].(string); ok && v != "" {
+					cfg.CacheDir = v
+				}
+			}
+			if v, ok := cfgFile["connections"].(float64); ok && v > 0 {
+				cfg.Concurrency = int(v)
+			}
+			if v, ok := cfgFile["max-active"].(float64); ok && v > 0 {
+				cfg.MaxActiveDownloads = int(v)
+			}
+			if v, ok := cfgFile["multipart-threshold"].(string); ok && v != "" {
+				cfg.MultipartThreshold = v
+			}
+			if v, ok := cfgFile["verify"].(string); ok && v != "" {
+				cfg.Verify = v
+			}
+			if v, ok := cfgFile["retries"].(float64); ok && v > 0 {
+				cfg.Retries = int(v)
+			}
 		}
 
 		// Use live TUI for download progress

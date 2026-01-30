@@ -60,7 +60,14 @@ Examples:
   hfdownloader info --format json TheBloke/Mistral-7B-Instruct-v0.2-GGUF`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			// Determine cache directory
+			// Determine cache directory: CLI flag > config file > HF_HOME > default
+			if cacheDir == "" {
+				if cfg := loadConfigMap(); cfg != nil {
+					if v, ok := cfg["cache-dir"].(string); ok && v != "" {
+						cacheDir = v
+					}
+				}
+			}
 			if cacheDir == "" {
 				cacheDir = hfdownloader.DefaultCacheDir()
 			}
