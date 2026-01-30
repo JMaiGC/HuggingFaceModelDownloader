@@ -268,12 +268,6 @@ Browse everything you've downloaded with stats, search, and filters:
 
 ![Cache Browser](docs/screenshots/web-dashboard2.png)
 
-### Mirror Sync UI
-
-Configure targets and sync your cache between locations:
-
-![Mirror Page](docs/screenshots/web-dashboar3.png)
-
 ### All Pages
 
 | Page | Features |

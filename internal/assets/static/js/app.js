@@ -1580,6 +1580,21 @@
       $('#retries').value = data.retries || 4;
       $('#verify').value = data.verify || 'size';
       $('#endpoint').value = data.endpoint || '';
+
+      // Load proxy settings
+      if (data.proxy) {
+        $('#proxyUrl').value = data.proxy.url || '';
+        $('#proxyUsername').value = data.proxy.username || '';
+        $('#proxyPassword').value = ''; // Never show saved password
+        $('#proxyNoProxy').value = data.proxy.noProxy || '';
+        $('#proxyNoEnvProxy').checked = data.proxy.noEnvProxy || false;
+      } else {
+        $('#proxyUrl').value = '';
+        $('#proxyUsername').value = '';
+        $('#proxyPassword').value = '';
+        $('#proxyNoProxy').value = '';
+        $('#proxyNoEnvProxy').checked = false;
+      }
     } catch (e) {
       console.error('Failed to load settings:', e);
     }
@@ -1613,9 +1628,29 @@
       endpoint: $('#endpoint')?.value || ''
     };
 
+    // Add proxy settings if URL is provided
+    const proxyUrl = $('#proxyUrl')?.value || '';
+    if (proxyUrl || $('#proxyNoEnvProxy')?.checked) {
+      body.proxy = {
+        url: proxyUrl,
+        username: $('#proxyUsername')?.value || '',
+        noProxy: $('#proxyNoProxy')?.value || '',
+        noEnvProxy: $('#proxyNoEnvProxy')?.checked || false
+      };
+      // Only send password if it was changed (not empty)
+      const proxyPassword = $('#proxyPassword')?.value;
+      if (proxyPassword) {
+        body.proxy.password = proxyPassword;
+      }
+    }
+
     try {
       const result = await api('POST', '/settings', body);
       showToast(result.message || 'Settings saved', 'success');
+      // Clear password field after save
+      if ($('#proxyPassword')) {
+        $('#proxyPassword').value = '';
+      }
     } catch (e) {
       showToast(`Failed: ${e.message}`, 'error');
     }

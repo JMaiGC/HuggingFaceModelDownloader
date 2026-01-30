@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/bodaay/HuggingFaceModelDownloader/internal/assets"
+	"github.com/bodaay/HuggingFaceModelDownloader/pkg/hfdownloader"
 )
 
 // Config holds server configuration.
@@ -34,6 +35,9 @@ type Config struct {
 	// Authentication
 	AuthUser string // Basic auth username (empty = no auth)
 	AuthPass string // Basic auth password
+
+	// Proxy configuration
+	Proxy *hfdownloader.ProxyConfig
 }
 
 // DefaultConfig returns sensible defaults.

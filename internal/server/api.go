@@ -56,9 +56,21 @@ type SettingsResponse struct {
 	Verify             string `json:"verify"`
 	Retries            int    `json:"retries"`
 	Endpoint           string `json:"endpoint,omitempty"`
+	// Proxy settings
+	Proxy *ProxySettingsResponse `json:"proxy,omitempty"`
 	// Config file paths
 	ConfigFile  string `json:"configFile,omitempty"`
 	TargetsFile string `json:"targetsFile,omitempty"`
+}
+
+// ProxySettingsResponse represents proxy configuration in API responses.
+type ProxySettingsResponse struct {
+	URL                string `json:"url,omitempty"`
+	Username           string `json:"username,omitempty"`
+	NoProxy            string `json:"noProxy,omitempty"`
+	NoEnvProxy         bool   `json:"noEnvProxy,omitempty"`
+	InsecureSkipVerify bool   `json:"insecureSkipVerify,omitempty"`
+	// Note: Password is intentionally omitted from response for security
 }
 
 // ErrorResponse represents an API error.
@@ -346,6 +358,17 @@ func (s *Server) handleGetSettings(w http.ResponseWriter, r *http.Request) {
 		TargetsFile:        hfdownloader.DefaultTargetsPath(),
 	}
 
+	// Add proxy settings (without password for security)
+	if s.config.Proxy != nil && s.config.Proxy.URL != "" {
+		resp.Proxy = &ProxySettingsResponse{
+			URL:                s.config.Proxy.URL,
+			Username:           s.config.Proxy.Username,
+			NoProxy:            s.config.Proxy.NoProxy,
+			NoEnvProxy:         s.config.Proxy.NoEnvProxy,
+			InsecureSkipVerify: s.config.Proxy.InsecureSkipVerify,
+		}
+	}
+
 	writeJSON(w, http.StatusOK, resp)
 }
 
@@ -360,6 +383,15 @@ func (s *Server) handleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 		Verify             *string `json:"verify,omitempty"`
 		Retries            *int    `json:"retries,omitempty"`
 		Endpoint           *string `json:"endpoint,omitempty"`
+		// Proxy settings
+		Proxy *struct {
+			URL                *string `json:"url,omitempty"`
+			Username           *string `json:"username,omitempty"`
+			Password           *string `json:"password,omitempty"`
+			NoProxy            *string `json:"noProxy,omitempty"`
+			NoEnvProxy         *bool   `json:"noEnvProxy,omitempty"`
+			InsecureSkipVerify *bool   `json:"insecureSkipVerify,omitempty"`
+		} `json:"proxy,omitempty"`
 		// Note: ModelsDir and DatasetsDir are NOT updatable via API for security
 	}
 
@@ -391,6 +423,35 @@ func (s *Server) handleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 		s.config.Endpoint = *req.Endpoint
 	}
 
+	// Update proxy settings
+	if req.Proxy != nil {
+		if s.config.Proxy == nil {
+			s.config.Proxy = &hfdownloader.ProxyConfig{}
+		}
+		if req.Proxy.URL != nil {
+			s.config.Proxy.URL = *req.Proxy.URL
+		}
+		if req.Proxy.Username != nil {
+			s.config.Proxy.Username = *req.Proxy.Username
+		}
+		if req.Proxy.Password != nil {
+			s.config.Proxy.Password = *req.Proxy.Password
+		}
+		if req.Proxy.NoProxy != nil {
+			s.config.Proxy.NoProxy = *req.Proxy.NoProxy
+		}
+		if req.Proxy.NoEnvProxy != nil {
+			s.config.Proxy.NoEnvProxy = *req.Proxy.NoEnvProxy
+		}
+		if req.Proxy.InsecureSkipVerify != nil {
+			s.config.Proxy.InsecureSkipVerify = *req.Proxy.InsecureSkipVerify
+		}
+		// Clear proxy if URL is empty
+		if s.config.Proxy.URL == "" {
+			s.config.Proxy = nil
+		}
+	}
+
 	// Also update job manager config
 	s.jobs.config = s.config
 
@@ -403,6 +464,17 @@ func (s *Server) handleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 		Verify:             s.config.Verify,
 		Retries:            s.config.Retries,
 		Endpoint:           s.config.Endpoint,
+	}
+	// Add proxy to config file if set
+	if s.config.Proxy != nil {
+		fileCfg.Proxy = &ProxyConfig{
+			URL:                s.config.Proxy.URL,
+			Username:           s.config.Proxy.Username,
+			Password:           s.config.Proxy.Password,
+			NoProxy:            s.config.Proxy.NoProxy,
+			NoEnvProxy:         s.config.Proxy.NoEnvProxy,
+			InsecureSkipVerify: s.config.Proxy.InsecureSkipVerify,
+		}
 	}
 	if err := SaveConfigFile(fileCfg); err != nil {
 		// Log error but don't fail the request - settings are still applied in-memory

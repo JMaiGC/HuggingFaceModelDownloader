@@ -335,6 +335,7 @@ func (m *JobManager) runJob(job *Job) {
 		BackoffInitial:     "400ms",
 		BackoffMax:         "10s",
 		Endpoint:           m.config.Endpoint,
+		Proxy:              m.config.Proxy,
 	}
 
 	// Progress callback - NOTE: must not hold lock when calling notifyListeners

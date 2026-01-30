@@ -10,21 +10,33 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/bodaay/HuggingFaceModelDownloader/pkg/hfdownloader"
 	"gopkg.in/yaml.v3"
 )
 
 // ConfigFile represents the persistent configuration file format.
 // This matches the CLI config file format for consistency.
 type ConfigFile struct {
-	Token              string `json:"token,omitempty" yaml:"token,omitempty"`
-	Connections        int    `json:"connections,omitempty" yaml:"connections,omitempty"`
-	MaxActive          int    `json:"max-active,omitempty" yaml:"max-active,omitempty"`
-	MultipartThreshold string `json:"multipart-threshold,omitempty" yaml:"multipart-threshold,omitempty"`
-	Verify             string `json:"verify,omitempty" yaml:"verify,omitempty"`
-	Retries            int    `json:"retries,omitempty" yaml:"retries,omitempty"`
-	Endpoint           string `json:"endpoint,omitempty" yaml:"endpoint,omitempty"`
-	BackoffInitial     string `json:"backoff-initial,omitempty" yaml:"backoff-initial,omitempty"`
-	BackoffMax         string `json:"backoff-max,omitempty" yaml:"backoff-max,omitempty"`
+	Token              string       `json:"token,omitempty" yaml:"token,omitempty"`
+	Connections        int          `json:"connections,omitempty" yaml:"connections,omitempty"`
+	MaxActive          int          `json:"max-active,omitempty" yaml:"max-active,omitempty"`
+	MultipartThreshold string       `json:"multipart-threshold,omitempty" yaml:"multipart-threshold,omitempty"`
+	Verify             string       `json:"verify,omitempty" yaml:"verify,omitempty"`
+	Retries            int          `json:"retries,omitempty" yaml:"retries,omitempty"`
+	Endpoint           string       `json:"endpoint,omitempty" yaml:"endpoint,omitempty"`
+	BackoffInitial     string       `json:"backoff-initial,omitempty" yaml:"backoff-initial,omitempty"`
+	BackoffMax         string       `json:"backoff-max,omitempty" yaml:"backoff-max,omitempty"`
+	Proxy              *ProxyConfig `json:"proxy,omitempty" yaml:"proxy,omitempty"`
+}
+
+// ProxyConfig holds proxy settings for the config file.
+type ProxyConfig struct {
+	URL                string `json:"url,omitempty" yaml:"url,omitempty"`
+	Username           string `json:"username,omitempty" yaml:"username,omitempty"`
+	Password           string `json:"password,omitempty" yaml:"password,omitempty"`
+	NoProxy            string `json:"no_proxy,omitempty" yaml:"no_proxy,omitempty"`
+	NoEnvProxy         bool   `json:"no_env_proxy,omitempty" yaml:"no_env_proxy,omitempty"`
+	InsecureSkipVerify bool   `json:"insecure_skip_verify,omitempty" yaml:"insecure_skip_verify,omitempty"`
 }
 
 var configMu sync.Mutex
@@ -154,6 +166,18 @@ func ApplyConfigToServer(serverCfg *Config) error {
 	}
 	if serverCfg.Endpoint == "" && fileCfg.Endpoint != "" {
 		serverCfg.Endpoint = fileCfg.Endpoint
+	}
+
+	// Apply proxy settings if not already set
+	if serverCfg.Proxy == nil && fileCfg.Proxy != nil {
+		serverCfg.Proxy = &hfdownloader.ProxyConfig{
+			URL:                fileCfg.Proxy.URL,
+			Username:           fileCfg.Proxy.Username,
+			Password:           fileCfg.Proxy.Password,
+			NoProxy:            fileCfg.Proxy.NoProxy,
+			NoEnvProxy:         fileCfg.Proxy.NoEnvProxy,
+			InsecureSkipVerify: fileCfg.Proxy.InsecureSkipVerify,
+		}
 	}
 
 	return nil
